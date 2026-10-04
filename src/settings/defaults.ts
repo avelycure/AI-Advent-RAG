@@ -16,11 +16,19 @@ export const PROVIDER_BASE_URLS: Record<LlmProviderId, string> = {
 
 export const PROVIDER_DEFAULT_MODELS: Record<LlmProviderId, string> = {
   ollama: 'qwen3:8b',
-  openai: '',
+  openai: 'gpt-5.4-mini-2026-03-17',
   deepseek: 'deepseek-flash',
-  glm: '',
+  glm: 'glm-5.3',
   custom: '',
 };
+
+export const DEFAULT_RETRIEVAL_CANDIDATE_TOP_K = 20;
+export const DEFAULT_RETRIEVAL_FINAL_TOP_K = 5;
+export const DEFAULT_SIMILARITY_THRESHOLD = 0.35;
+export const MIN_RETRIEVAL_CANDIDATE_TOP_K = 3;
+export const MAX_RETRIEVAL_CANDIDATE_TOP_K = 50;
+export const MIN_RETRIEVAL_FINAL_TOP_K = 1;
+export const MAX_RETRIEVAL_FINAL_TOP_K = 20;
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   folderMode: 'all',
@@ -30,11 +38,15 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   fixedChunkSize: DEFAULT_FIXED_CHUNK_SIZE,
   indexStorageFormat: 'binary',
   activeIndexStorageFormat: 'binary',
-  llmProvider: 'ollama',
-  llmBaseUrl: PROVIDER_BASE_URLS.ollama,
-  llmModel: PROVIDER_DEFAULT_MODELS.ollama,
-  llmApiKeySecretId: '',
-  topK: 10,
+  llmProvider: 'deepseek',
+  llmBaseUrl: PROVIDER_BASE_URLS.deepseek,
+  llmModel: PROVIDER_DEFAULT_MODELS.deepseek,
+  llmApiKeySecretId: 'ai-advent-rag-deepseek',
+  useRag: true,
+  useRetrievalEnhancements: true,
+  retrievalCandidateTopK: DEFAULT_RETRIEVAL_CANDIDATE_TOP_K,
+  retrievalFinalTopK: DEFAULT_RETRIEVAL_FINAL_TOP_K,
+  similarityThreshold: DEFAULT_SIMILARITY_THRESHOLD,
   lastIndexedAt: null,
   indexNeedsRebuild: true,
 };
@@ -43,11 +55,7 @@ export function sanitizeSettings(value: unknown): PluginSettings {
   const raw = isRecord(value) ? value : {};
   const folderMode: PluginSettings['folderMode'] =
     raw.folderMode === 'include' || raw.folderMode === 'exclude' ? raw.folderMode : 'all';
-  const llmProvider: PluginSettings['llmProvider'] =
-    typeof raw.llmProvider === 'string' &&
-    Object.prototype.hasOwnProperty.call(PROVIDER_BASE_URLS, raw.llmProvider)
-      ? (raw.llmProvider as PluginSettings['llmProvider'])
-      : 'ollama';
+  const llmProvider: PluginSettings['llmProvider'] = 'deepseek';
   const selectedFolders = Array.isArray(raw.selectedFolders)
     ? raw.selectedFolders.filter((folder): folder is string => typeof folder === 'string')
     : [];
@@ -55,6 +63,21 @@ export function sanitizeSettings(value: unknown): PluginSettings {
     typeof raw.lastIndexedAt === 'number' && Number.isFinite(raw.lastIndexedAt)
       ? raw.lastIndexedAt
       : null;
+  const retrievalCandidateTopK = clampInteger(
+    raw.retrievalCandidateTopK,
+    MIN_RETRIEVAL_CANDIDATE_TOP_K,
+    MAX_RETRIEVAL_CANDIDATE_TOP_K,
+    DEFAULT_RETRIEVAL_CANDIDATE_TOP_K,
+  );
+  const retrievalFinalTopK = Math.min(
+    retrievalCandidateTopK,
+    clampInteger(
+      raw.retrievalFinalTopK,
+      MIN_RETRIEVAL_FINAL_TOP_K,
+      MAX_RETRIEVAL_FINAL_TOP_K,
+      DEFAULT_RETRIEVAL_FINAL_TOP_K,
+    ),
+  );
 
   return {
     folderMode,
@@ -65,17 +88,36 @@ export function sanitizeSettings(value: unknown): PluginSettings {
     fixedChunkSize: sanitizeFixedChunkSize(raw.fixedChunkSize),
     indexStorageFormat: sanitizeStorageFormat(raw.indexStorageFormat),
     activeIndexStorageFormat: sanitizeStorageFormat(raw.activeIndexStorageFormat),
-    llmBaseUrl:
-      typeof raw.llmBaseUrl === 'string' ? raw.llmBaseUrl : PROVIDER_BASE_URLS[llmProvider],
+    llmBaseUrl: PROVIDER_BASE_URLS.deepseek,
     llmModel:
-      typeof raw.llmModel === 'string' ? raw.llmModel : PROVIDER_DEFAULT_MODELS[llmProvider],
-    llmApiKeySecretId:
-      typeof raw.llmApiKeySecretId === 'string' ? raw.llmApiKeySecretId : '',
-    topK: Math.max(1, Math.min(20, Math.round(Number(raw.topK) || DEFAULT_SETTINGS.topK))),
+      typeof raw.llmModel === 'string' && raw.llmProvider === 'deepseek' && raw.llmModel.trim()
+        ? raw.llmModel.trim()
+        : PROVIDER_DEFAULT_MODELS.deepseek,
+    llmApiKeySecretId: 'ai-advent-rag-deepseek',
+    useRag: typeof raw.useRag === 'boolean' ? raw.useRag : DEFAULT_SETTINGS.useRag,
+    useRetrievalEnhancements:
+      typeof raw.useRetrievalEnhancements === 'boolean'
+        ? raw.useRetrievalEnhancements
+        : DEFAULT_SETTINGS.useRetrievalEnhancements,
+    retrievalCandidateTopK,
+    retrievalFinalTopK,
+    similarityThreshold: sanitizeSimilarityThreshold(raw.similarityThreshold),
     lastIndexedAt,
     indexNeedsRebuild:
       typeof raw.indexNeedsRebuild === 'boolean' ? raw.indexNeedsRebuild : true,
   };
+}
+
+function clampInteger(value: unknown, minimum: number, maximum: number, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(minimum, Math.min(maximum, Math.round(parsed)));
+}
+
+function sanitizeSimilarityThreshold(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_SIMILARITY_THRESHOLD;
+  return Math.max(0, Math.min(1, Math.round(parsed * 100) / 100));
 }
 
 function sanitizeStructureChunkingUnit(

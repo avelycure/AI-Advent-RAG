@@ -33,3 +33,10 @@ export function extractHttpError(status: number, text: string): string {
 export function joinUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
 }
+
+export function httpStatusMessage(status: number): string {
+  if (status === 401 || status === 403) return `Сервис модели отклонил авторизацию (HTTP ${status}).`;
+  if (status === 402) return 'Сервис модели отклонил запрос из-за ограничений оплаты (HTTP 402).';
+  if (status === 429) return 'Сервис модели временно ограничил частоту запросов (HTTP 429).';
+  return `Сервис модели вернул ошибку HTTP ${status}.`;
+}

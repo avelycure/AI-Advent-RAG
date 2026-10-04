@@ -1,6 +1,6 @@
 {
   "name": "ai-advent-rag",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "description": "Local document indexing and semantic retrieval for Obsidian",
   "main": "main.js",
   "type": "module",
@@ -9,6 +9,10 @@
     "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
     "test": "vitest run",
     "test:watch": "vitest",
+    "eval:day22": "node scripts/run-day22-eval.mjs",
+    "eval:day23": "node scripts/run-day23-eval.mjs",
+    "eval:day24": "node scripts/run-day24-eval.mjs",
+    "eval:day25": "node scripts/run-day25-eval.mjs",
     "prepare:day21-corpus": "node scripts/export-day21-corpus.mjs",
     "lint": "eslint . --max-warnings=0"
   },

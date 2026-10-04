@@ -1,9 +1,9 @@
 {
   "id": "ai-advent-rag",
   "name": "AI Advent RAG",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "minAppVersion": "1.11.4",
-  "description": "Build and compare local semantic indexes, then inspect matching note fragments.",
+  "description": "Chat with DeepSeek with or without locally retrieved Obsidian note context.",
   "author": "avelycure",
   "isDesktopOnly": true
 }

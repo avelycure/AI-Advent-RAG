@@ -1,11 +1,12 @@
 import { requestUrl } from 'obsidian';
-import { extractHttpError, type HttpRequest, type HttpResponse, type HttpTransport } from './http';
+import { httpStatusMessage } from './http';
+import type { HttpRequest, HttpResponse, HttpTransport } from './http';
 
 export class ObsidianHttpTransport implements HttpTransport {
   async request<T>(request: HttpRequest): Promise<HttpResponse<T>> {
     let response;
     try {
-      const responsePromise = requestUrl({
+      response = await requestUrl({
         url: request.url,
         method: request.method ?? 'GET',
         headers: request.headers,
@@ -13,33 +14,13 @@ export class ObsidianHttpTransport implements HttpTransport {
         body: request.body === undefined ? undefined : JSON.stringify(request.body),
         throw: false,
       });
-      response = await withTimeout(responsePromise, request.timeoutMs ?? 120_000);
-    } catch (error) {
-      console.error('AI Advent RAG model request failed.', error);
-      throw new Error(
-        'Не удалось подключиться к локальной Ollama. Убедитесь, что приложение запущено.',
-      );
+    } catch {
+      throw new Error('Не удалось подключиться к сервису модели. Проверьте сеть и адрес API.');
     }
 
     if (response.status >= 400) {
-      console.error('AI Advent RAG model HTTP error.', extractHttpError(response.status, response.text));
-      throw new Error(`Ollama вернула ошибку HTTP ${response.status}.`);
+      throw new Error(httpStatusMessage(response.status));
     }
     return { status: response.status, data: response.json as T, text: response.text };
-  }
-}
-
-async function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number): Promise<T> {
-  let timeoutId: number | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timeoutId = window.setTimeout(
-      () => reject(new Error(`Модель не ответила за ${Math.round(timeoutMs / 1000)} секунд.`)),
-      timeoutMs,
-    );
-  });
-  try {
-    return await Promise.race([Promise.resolve(promise), timeout]);
-  } finally {
-    if (timeoutId !== undefined) window.clearTimeout(timeoutId);
   }
 }

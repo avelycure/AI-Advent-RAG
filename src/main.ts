@@ -9,17 +9,26 @@ import {
 import { ensureIndexDirectory, indexDirectoryPath } from './indexing/index-paths';
 import { discoverFolders, scopeSignature } from './indexing/folder-scope';
 import { ObsidianHttpTransport } from './infrastructure/obsidian-http-transport';
+import { NodeHttpsTransport } from './infrastructure/node-https-transport';
+import { ConfigurableLlmClient, DEEPSEEK_API_BASE_URL } from './llm/llm-client';
+import { RagService } from './rag/rag-service';
+import { validateIndexSnapshot } from './rag/validate-index-snapshot';
 import { RetrievalService } from './retrieval/retrieval-service';
 import { DEFAULT_SETTINGS, sanitizeSettings } from './settings/defaults';
 import { AiAdventRagSettingsTab } from './settings/settings-tab';
 import { CHAT_VIEW_TYPE, ChatView } from './ui/chat-view';
+import { ChatStateRepository } from './ui/chat-state-repository';
+import type { ChatState } from './ui/chat-state';
 import type {
   ChunkingComparison,
+  ChatTurn,
   IndexProgress,
   PluginSettings,
+  RagAnswer,
   RetrievalResponse,
   SearchResult,
   StructureChunkingUnit,
+  TaskMemory,
 } from './types';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -29,14 +38,21 @@ export default class AiAdventRagPlugin extends Plugin {
   settings: PluginSettings = { ...DEFAULT_SETTINGS };
   private indexController!: IndexController;
   private retrievalService!: RetrievalService;
+  private ragService!: RagService;
+  private llmClient!: ConfigurableLlmClient;
+  private chatStateRepository!: ChatStateRepository;
   private changeRevision = 0;
 
   async onload(): Promise<void> {
     this.settings = sanitizeSettings(await this.loadData());
-    await ensureIndexDirectory(this.pluginDirectoryPath());
+    const pluginDirectory = this.pluginDirectoryPath();
+    await ensureIndexDirectory(pluginDirectory);
+    this.chatStateRepository = new ChatStateRepository(pluginDirectory);
     const transport = new ObsidianHttpTransport();
     const embeddings = new OllamaEmbeddingClient(transport);
+    this.llmClient = new ConfigurableLlmClient(new NodeHttpsTransport(DEEPSEEK_API_BASE_URL));
     this.retrievalService = new RetrievalService(embeddings);
+    this.ragService = new RagService(embeddings, this.llmClient);
     this.indexController = new IndexController(
       this.app,
       embeddings,
@@ -51,12 +67,12 @@ export default class AiAdventRagPlugin extends Plugin {
     }
 
     this.registerView(CHAT_VIEW_TYPE, (leaf) => new ChatView(leaf, this));
-    this.addRibbonIcon('search', 'Search indexed notes', () => {
+    this.addRibbonIcon('message-circle', 'Открыть чат с DeepSeek', () => {
       void this.activateChatView();
     });
     this.addCommand({
       id: 'open-question-panel',
-      name: 'Open semantic search panel',
+      name: 'Открыть чат с DeepSeek',
       callback: () => void this.activateChatView(),
     });
     this.addCommand({
@@ -149,6 +165,7 @@ export default class AiAdventRagPlugin extends Plugin {
         snapshot.structureChunkingUnit !== this.settings.structureChunkingUnit ||
         snapshot.fixedChunkSize !== this.settings.fixedChunkSize;
       await this.saveSettings();
+      this.refreshChatViews();
       new Notice(`Индекс перестроен: ${snapshot.chunks.length} фрагментов.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -158,22 +175,98 @@ export default class AiAdventRagPlugin extends Plugin {
   }
 
   async search(query: string): Promise<RetrievalResponse> {
-    const snapshot = this.indexController.getSnapshot();
-    if (!snapshot) throw new Error('Build the local index in plugin settings first.');
-    if (
-      snapshot.scopeSignature !== this.currentScopeSignature() ||
-      snapshot.chunkingStrategy !== this.settings.chunkingStrategy ||
-      snapshot.structureChunkingUnit !== this.settings.structureChunkingUnit ||
-      snapshot.fixedChunkSize !== this.settings.fixedChunkSize
-    ) {
-      throw new Error('The index settings changed. Rebuild the index before searching.');
-    }
+    const snapshot = this.validatedSnapshot();
+    const useEnhancements = this.settings.useRetrievalEnhancements;
     return this.retrievalService.search(
       query,
       snapshot,
-      this.settings.topK,
+      {
+        candidateTopK: useEnhancements
+          ? this.settings.retrievalCandidateTopK
+          : this.settings.retrievalFinalTopK,
+        finalTopK: this.settings.retrievalFinalTopK,
+        minimumScore: useEnhancements ? this.settings.similarityThreshold : -1,
+        expandRelevantSources: useEnhancements,
+      },
       (queryVector, topK) => this.indexController.searchVector(queryVector, topK),
     );
+  }
+
+  async answerQuestion(
+    question: string,
+    history: readonly ChatTurn[],
+    useRag: boolean,
+    useRetrievalEnhancements: boolean,
+    taskMemory: TaskMemory,
+  ): Promise<RagAnswer> {
+    const apiKey = this.app.secretStorage.getSecret(this.settings.llmApiKeySecretId)?.trim();
+    if (!apiKey) throw new Error('Добавьте API-ключ DeepSeek в настройках плагина.');
+    const snapshot = useRag ? this.validatedSnapshot() : null;
+    return this.ragService.answer(
+      question,
+      snapshot,
+      this.deepSeekConfig(apiKey),
+      {
+        useRag,
+        useRetrievalEnhancements,
+        candidateTopK: this.settings.retrievalCandidateTopK,
+        finalTopK: this.settings.retrievalFinalTopK,
+        similarityThreshold: this.settings.similarityThreshold,
+      },
+      history,
+      snapshot
+        ? (queryVector, topK) => this.indexController.searchVector(queryVector, topK)
+        : undefined,
+      taskMemory,
+    );
+  }
+
+  async loadChatState(): Promise<ChatState> {
+    return this.chatStateRepository.load();
+  }
+
+  async saveChatState(state: ChatState): Promise<void> {
+    await this.chatStateRepository.save(state);
+  }
+
+  async clearChatState(): Promise<void> {
+    await this.chatStateRepository.clear();
+  }
+
+  usesRag(): boolean {
+    return this.settings.useRag;
+  }
+
+  usesRetrievalEnhancements(): boolean {
+    return this.settings.useRetrievalEnhancements;
+  }
+
+  refreshChatViews(): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)) {
+      if (leaf.view instanceof ChatView) leaf.view.refreshMode();
+    }
+  }
+
+  hasDeepSeekApiKey(): boolean {
+    return Boolean(this.app.secretStorage.getSecret(this.settings.llmApiKeySecretId)?.trim());
+  }
+
+  async saveDeepSeekApiKey(value: string): Promise<void> {
+    const secret = value.trim();
+    if (!secret) throw new Error('Введите API-ключ DeepSeek.');
+    this.app.secretStorage.setSecret(this.settings.llmApiKeySecretId, secret);
+    await this.saveSettings();
+  }
+
+  async clearDeepSeekApiKey(): Promise<void> {
+    this.app.secretStorage.setSecret(this.settings.llmApiKeySecretId, '');
+    await this.saveSettings();
+  }
+
+  async testDeepSeekConnection(): Promise<void> {
+    const apiKey = this.app.secretStorage.getSecret(this.settings.llmApiKeySecretId)?.trim();
+    if (!apiKey) throw new Error('Добавьте API-ключ DeepSeek перед проверкой.');
+    await this.llmClient.testConnection(this.deepSeekConfig(apiKey));
   }
 
   async openSource(source: SearchResult): Promise<void> {
@@ -217,6 +310,20 @@ export default class AiAdventRagPlugin extends Plugin {
     });
   }
 
+  private deepSeekConfig(apiKey: string) {
+    return {
+      provider: 'deepseek' as const,
+      baseUrl: DEEPSEEK_API_BASE_URL,
+      model: this.settings.llmModel,
+      apiKey,
+    };
+  }
+
+  private validatedSnapshot() {
+    const snapshot = this.indexController.getSnapshot();
+    return validateIndexSnapshot(snapshot, this.settings, this.currentScopeSignature());
+  }
+
   private registerVaultChangeTracking(): void {
     const markDirty = (file: unknown): void => {
       if (!(file instanceof TFile) || file.extension !== 'md') return;
@@ -257,6 +364,7 @@ export default class AiAdventRagPlugin extends Plugin {
         snapshot.structureChunkingUnit !== this.settings.structureChunkingUnit ||
         snapshot.fixedChunkSize !== this.settings.fixedChunkSize;
       await this.saveSettings();
+      this.refreshChatViews();
       new Notice(`Еженедельное обновление индекса завершено: ${snapshot.chunks.length} фрагментов.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

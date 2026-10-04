@@ -1,6 +1,20 @@
-import { PluginSettingTab, Setting, type App, type ButtonComponent } from 'obsidian';
+import {
+  Notice,
+  PluginSettingTab,
+  Setting,
+  type App,
+  type ButtonComponent,
+  type SliderComponent,
+} from 'obsidian';
 import type AiAdventRagPlugin from '../main';
-import { isValidFolderPath, normalizeFolder } from './defaults';
+import {
+  MAX_RETRIEVAL_CANDIDATE_TOP_K,
+  MAX_RETRIEVAL_FINAL_TOP_K,
+  MIN_RETRIEVAL_CANDIDATE_TOP_K,
+  MIN_RETRIEVAL_FINAL_TOP_K,
+  isValidFolderPath,
+  normalizeFolder,
+} from './defaults';
 import {
   MAX_FIXED_CHUNK_SIZE,
   MIN_FIXED_CHUNK_SIZE,
@@ -26,9 +40,10 @@ export class AiAdventRagSettingsTab extends PluginSettingTab {
     new Setting(containerEl).setName('Индекс').setHeading();
 
     new Setting(containerEl).setName('Локальные эмбеддинги').setDesc(
-      'Для индекса и поиска используется qwen3-embedding:0.6b через локальную Ollama. Тексты заметок не отправляются в LLM.',
+      'Для индекса и поиска используется qwen3-embedding:0.6b через локальную Ollama. В режиме RAG найденные фрагменты отправляются в DeepSeek только при отправке вопроса.',
     );
 
+    let finalTopKSlider: SliderComponent | undefined;
     new Setting(containerEl)
       .setName('Формат хранения индекса')
       .setDesc(
@@ -201,20 +216,191 @@ export class AiAdventRagSettingsTab extends PluginSettingTab {
 
     if (this.plugin.settings.folderMode !== 'all') this.renderFolderSelection(containerEl);
 
-    new Setting(containerEl).setName('Поиск').setHeading();
+    new Setting(containerEl).setName('Чат с DeepSeek').setHeading();
     new Setting(containerEl)
-      .setName('Максимум результатов')
-      .setDesc('Максимальное количество найденных фрагментов в панели поиска.')
-      .addSlider((slider) =>
-        slider
-          .setLimits(3, 20, 1)
-          .setValue(this.plugin.settings.topK)
+      .setName('Использовать RAG')
+      .setDesc(
+        this.plugin.settings.useRag
+          ? 'Вопрос сначала ищется в локальном индексе. Затем вопрос и показанные в чате фрагменты заметок отправляются в DeepSeek.'
+          : 'В DeepSeek отправляются только вопрос и недавняя история текущего чата. Индекс и заметки не используются.',
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.useRag)
           .onChange(async (value) => {
-            this.plugin.settings.topK = value;
+            this.plugin.settings.useRag = value;
+            await this.plugin.saveSettings();
+            this.plugin.refreshChatViews();
+            this.display();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Модель DeepSeek')
+      .setDesc('По умолчанию используется экономичная модель deepseek-flash в режиме без рассуждений.')
+      .addText((text) =>
+        text
+          .setPlaceholder('deepseek-flash')
+          .setValue(this.plugin.settings.llmModel)
+          .onChange(async (value) => {
+            const model = value.trim();
+            if (!model) return;
+            this.plugin.settings.llmModel = model;
             await this.plugin.saveSettings();
           }),
       );
 
+    let tokenDraft = '';
+    let saveTokenButton: ButtonComponent;
+    const tokenSetting = new Setting(containerEl)
+      .setName('API-ключ DeepSeek')
+      .setDesc(
+        'Ключ хранится локально в SecretStorage Obsidian и не записывается в data.json. Используется официальный DeepSeek Chat Completions API.',
+      );
+    tokenSetting
+      .addText((text) => {
+        text.inputEl.type = 'password';
+        text.inputEl.autocomplete = 'off';
+        text.setPlaceholder(
+          this.plugin.hasDeepSeekApiKey() ? 'Ключ сохранён локально' : 'Вставьте ключ DeepSeek API',
+        );
+        text.onChange((value) => {
+          tokenDraft = value;
+          saveTokenButton?.setDisabled(!value.trim());
+        });
+      })
+      .addButton((button) => {
+        saveTokenButton = button;
+        button
+          .setButtonText('Сохранить токен')
+          .setCta()
+          .setDisabled(true)
+          .onClick(async () => {
+            try {
+              await this.plugin.saveDeepSeekApiKey(tokenDraft);
+              new Notice('API-ключ DeepSeek сохранён локально.');
+              this.display();
+            } catch (error) {
+              new Notice(error instanceof Error ? error.message : String(error));
+            }
+          });
+      })
+      .addButton((button) =>
+        button
+          .setButtonText('Удалить токен')
+          .setWarning()
+          .setDisabled(!this.plugin.hasDeepSeekApiKey())
+          .onClick(async () => {
+            await this.plugin.clearDeepSeekApiKey();
+            new Notice('API-ключ DeepSeek удалён.');
+            this.display();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Проверка DeepSeek')
+      .setDesc('Проверяет доступ к выбранной модели через официальный DeepSeek API без текста заметок.')
+      .addButton((button) =>
+        button
+          .setButtonText('Проверить подключение')
+          .setDisabled(!this.plugin.hasDeepSeekApiKey())
+          .onClick(async () => {
+            button.setDisabled(true).setButtonText('Проверка…');
+            try {
+              await this.plugin.testDeepSeekConnection();
+              new Notice('DeepSeek API доступен, выбранная модель отвечает.');
+            } catch (error) {
+              new Notice(error instanceof Error ? error.message : String(error));
+            } finally {
+              this.display();
+            }
+          }),
+      );
+
+    new Setting(containerEl).setName('Улучшение поиска для RAG').setHeading();
+    new Setting(containerEl)
+      .setName('Фильтрация и переформулирование запроса')
+      .setDesc(
+        this.plugin.settings.useRetrievalEnhancements
+          ? 'DeepSeek превращает вопрос в самостоятельный поисковый запрос, затем similarity-порог отбрасывает слабые совпадения. Для ответа выполняется отдельный запрос к DeepSeek.'
+          : 'Используется исходный вопрос и базовый векторный поиск без порога релевантности. Этот режим нужен для сравнения качества.',
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.useRetrievalEnhancements)
+          .onChange(async (value) => {
+            this.plugin.settings.useRetrievalEnhancements = value;
+            await this.plugin.saveSettings();
+            this.plugin.refreshChatViews();
+            this.display();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Количество кандидатов до фильтрации (top-K)')
+      .setDesc('Сколько наиболее близких чанков получить из локального векторного индекса до применения порога.')
+      .addSlider((slider) =>
+        slider
+          .setLimits(
+            MIN_RETRIEVAL_CANDIDATE_TOP_K,
+            MAX_RETRIEVAL_CANDIDATE_TOP_K,
+            1,
+          )
+          .setValue(this.plugin.settings.retrievalCandidateTopK)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.retrievalCandidateTopK = value;
+            this.plugin.settings.retrievalFinalTopK = Math.min(
+              value,
+              this.plugin.settings.retrievalFinalTopK,
+            );
+            await this.plugin.saveSettings();
+            finalTopKSlider
+              ?.setLimits(
+                MIN_RETRIEVAL_FINAL_TOP_K,
+                Math.min(MAX_RETRIEVAL_FINAL_TOP_K, value),
+                1,
+              )
+              .setValue(this.plugin.settings.retrievalFinalTopK);
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Порог сходства (similarity)')
+      .setDesc(
+        `Файл проходит фильтр, если similarity его лучшего чанка не ниже порога; затем реранкер выбирает содержательные чанки этого файла. Текущее значение: ${this.plugin.settings.similarityThreshold.toFixed(2)}. Значение 0 отключает абсолютное отсечение.`,
+      )
+      .addSlider((slider) =>
+        slider
+          .setLimits(0, 1, 0.01)
+          .setValue(this.plugin.settings.similarityThreshold)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.similarityThreshold = Math.round(value * 100) / 100;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Количество результатов после фильтрации (top-K)')
+      .setDesc('Максимальное количество прошедших порог чанков, которые можно отправить в DeepSeek.')
+      .addSlider((slider) =>
+        (finalTopKSlider = slider)
+          .setLimits(
+            MIN_RETRIEVAL_FINAL_TOP_K,
+            Math.min(
+              MAX_RETRIEVAL_FINAL_TOP_K,
+              this.plugin.settings.retrievalCandidateTopK,
+            ),
+            1,
+          )
+          .setValue(this.plugin.settings.retrievalFinalTopK)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.retrievalFinalTopK = value;
+            await this.plugin.saveSettings();
+          }),
+      );
   }
 
   private renderChunkingComparison(containerEl: HTMLElement): void {

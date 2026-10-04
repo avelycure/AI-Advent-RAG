@@ -24,7 +24,11 @@ export interface PluginSettings {
   llmBaseUrl: string;
   llmModel: string;
   llmApiKeySecretId: string;
-  topK: number;
+  useRag: boolean;
+  useRetrievalEnhancements: boolean;
+  retrievalCandidateTopK: number;
+  retrievalFinalTopK: number;
+  similarityThreshold: number;
   lastIndexedAt: number | null;
   indexNeedsRebuild: boolean;
 }
@@ -93,6 +97,7 @@ export interface SearchResult {
   chunk: IndexedChunk;
   score: number;
   sourceId: string;
+  contextTruncated?: boolean;
 }
 
 export interface IndexProgress {
@@ -140,10 +145,76 @@ export interface VectorSearchHit {
 export interface RagAnswer {
   text: string;
   sources: SearchResult[];
+  citations: GroundedCitation[];
+  groundingStatus: GroundingStatus;
+  taskMemory: TaskMemory;
+  taskMemoryUpdated: boolean;
+  usedRag: boolean;
+  usedRetrievalEnhancements: boolean;
+  modelCalled: boolean;
+  retrieval?: RetrievalDiagnostics;
+}
+
+export interface TaskMemoryTerm {
+  term: string;
+  meaning: string;
+}
+
+export interface TaskMemory {
+  goal: string | null;
+  clarifiedFacts: string[];
+  constraints: string[];
+  terms: TaskMemoryTerm[];
+}
+
+export type GroundingStatus = 'not-applicable' | 'grounded' | 'not-enough-context';
+
+export interface GroundedCitation {
+  sourceId: string;
+  source: string;
+  section: string | null;
+  chunkId: string;
+  quote: string;
+}
+
+export interface ChatTurn {
+  role: 'user' | 'assistant';
+  content: string;
 }
 
 export interface RetrievalResponse {
   query: string;
   strategy: ChunkingStrategy;
   results: SearchResult[];
+  candidateCount: number;
+}
+
+export interface RetrievalOptions {
+  candidateTopK: number;
+  finalTopK: number;
+  minimumScore: number;
+  expandRelevantSources?: boolean;
+}
+
+export interface RetrievalDiagnostics {
+  originalQuery: string;
+  searchQuery: string;
+  queryRewritten: boolean;
+  rewriteFailed: boolean;
+  candidateCount: number;
+  resultCount: number;
+  candidateTopK: number;
+  finalTopK: number;
+  similarityThreshold: number | null;
+  groundingRepairAttempted?: boolean;
+  groundingValidationFailed?: boolean;
+  taskMemoryUpdateFailed?: boolean;
+}
+
+export interface RagPipelineOptions {
+  useRag: boolean;
+  useRetrievalEnhancements: boolean;
+  candidateTopK: number;
+  finalTopK: number;
+  similarityThreshold: number;
 }

@@ -44,4 +44,12 @@ export default defineConfig(
       'obsidianmd/prefer-window-timers': 'off',
     },
   },
+  {
+    files: ['scripts/**/*.mjs'],
+    rules: {
+      // Standalone Node.js tools do not run inside Obsidian's renderer process.
+      'no-restricted-globals': 'off',
+      'obsidianmd/hardcoded-config-path': 'off',
+    },
+  },
 );
