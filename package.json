@@ -1,0 +1,43 @@
+{
+  "name": "ai-advent-rag",
+  "version": "0.1.0",
+  "description": "Local document indexing and semantic retrieval for Obsidian",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepare:day21-corpus": "node scripts/export-day21-corpus.mjs",
+    "lint": "eslint . --max-warnings=0"
+  },
+  "keywords": [
+    "obsidian",
+    "rag",
+    "ollama",
+    "semantic-search"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@eslint/json": "^0.14.0",
+    "@types/node": "^22.15.17",
+    "@types/sql.js": "^1.4.9",
+    "esbuild": "^0.25.5",
+    "eslint": "^9.39.4",
+    "eslint-plugin-obsidianmd": "^0.4.2",
+    "globals": "^17.6.0",
+    "obsidian": "^1.13.1",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.59.1",
+    "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "faiss-node": "^0.5.1",
+    "sql.js": "^1.13.0"
+  }
+}

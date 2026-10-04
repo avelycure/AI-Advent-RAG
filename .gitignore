@@ -1,0 +1,11 @@
+node_modules/
+main.js
+*.map
+data.json
+rag-index.bin
+rag-index.bin.tmp
+rag-indexes/
+.DS_Store
+coverage/
+.idea/
+.vscode/

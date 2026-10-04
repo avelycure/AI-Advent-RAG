@@ -1,0 +1,97 @@
+.ai-advent-rag-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-3);
+  padding: var(--size-4-3);
+}
+
+.ai-advent-rag-index-status,
+.ai-advent-rag-privacy-note,
+.ai-advent-rag-error {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.ai-advent-rag-privacy-note {
+  border-left: 3px solid var(--interactive-accent);
+  padding-left: var(--size-4-3);
+}
+
+.ai-advent-rag-error {
+  color: var(--text-error);
+}
+
+.ai-advent-rag-validation-message {
+  color: var(--text-error);
+  margin-top: 0.35rem;
+}
+
+.ai-advent-rag-question {
+  min-height: 7rem;
+  resize: vertical;
+  width: 100%;
+}
+
+.ai-advent-rag-ask {
+  align-self: flex-end;
+}
+
+.ai-advent-rag-result-summary {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  margin-bottom: var(--size-4-3);
+}
+
+.ai-advent-rag-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-3);
+  list-style-position: inside;
+  margin: 0;
+  padding: 0;
+}
+
+.ai-advent-rag-result-card {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  padding: var(--size-4-3);
+}
+
+.ai-advent-rag-result-header {
+  display: flex;
+  font-weight: var(--font-semibold);
+  gap: var(--size-4-2);
+  justify-content: space-between;
+}
+
+.ai-advent-rag-score,
+.ai-advent-rag-result-location,
+.ai-advent-rag-result-metadata {
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+}
+
+.ai-advent-rag-fragment {
+  background: var(--background-primary);
+  margin: var(--size-4-2) 0 0;
+  max-height: 18rem;
+  overflow: auto;
+  padding: var(--size-4-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-advent-rag-folder-list {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  margin-block: var(--size-4-2) var(--size-4-4);
+  max-height: 20rem;
+  overflow: auto;
+  padding: 0 var(--size-4-3);
+}
+
+.ai-advent-rag-folder-list .setting-item {
+  padding-block: var(--size-4-2);
+}

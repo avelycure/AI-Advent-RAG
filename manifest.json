@@ -1,0 +1,9 @@
+{
+  "id": "ai-advent-rag",
+  "name": "AI Advent RAG",
+  "version": "0.1.0",
+  "minAppVersion": "1.11.4",
+  "description": "Build and compare local semantic indexes, then inspect matching note fragments.",
+  "author": "avelycure",
+  "isDesktopOnly": true
+}
