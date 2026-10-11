@@ -28,7 +28,7 @@ Copy the built `main.js`, `manifest.json`, and `styles.css` into `<vault>/.obsid
 5. Open **Чат с локальной Qwen** using the ribbon or command palette and send a question.
 6. RAG is the only chat mode. Query rewriting and filtering always run before streaming the answer with links to retrieved notes. The old direct and basic RAG switches have been removed.
 
-Existing cloud settings migrate automatically to local Ollama. The plugin does not fall back to a cloud model if Ollama is unavailable. The connection check sends only a test question. Chat history remains in `rag-chat-state.json`; **Очистить диалог** clears only the selected conversation. The generation request disables thinking and sets a 32,768-token context window with up to 4,096 output tokens.
+Existing cloud settings migrate automatically to local Ollama. The plugin does not fall back to a cloud model if Ollama is unavailable. The connection check sends only a test question. Chat history remains in `rag-chat-state.json`; a two-finger click (secondary click) on a dialog icon deletes that dialog. The generation request disables thinking and sets a 32,768-token context window with up to 4,096 output tokens.
 
 The current chat has no task memory or context sufficiency gate. Even with no retrieved fragments, Qwen generates an answer. Responses are plain text; citations are no longer validated or repaired. The chat shows retrieval stages and streams the actual model response. Existing task memory is discarded when loading old chat state. Historical Day 24–25 sections below describe earlier builds.
 
@@ -40,7 +40,7 @@ Pinned notes keep their original identity as the user switches pages. At executi
 
 One shared FIFO queue executes a complete pipeline at a time: note reading, rewriting, embeddings, retrieval, and streaming generation. Dialogs with a waiting or running request are highlighted in the bottom icon menu. Queue position and global model occupancy are not shown. Switching tabs or closing the panel does not interrupt a running request. A dialog permits one outstanding message; other dialogs remain available. Connection tests, standalone searches, and index rebuilds also use this queue. A failed task restores its message for retry and releases the next task.
 
-Dialog histories, selection, and attachment paths survive restart in version 2 of `rag-chat-state.json`. Waiting/running jobs and drafts are transient; an unanswered message after restart is marked as interrupted and can be sent again. Compact eraser and trash icons clear or delete the selected dialog. Clearing or deleting a busy dialog is disabled; removing a queued note attachment is allowed until the task starts.
+Dialog histories, selection, and attachment paths survive restart in version 2 of `rag-chat-state.json`. Waiting/running jobs and drafts are transient; an unanswered message after restart is marked as interrupted and can be sent again. Enter sends a message; Shift+Enter inserts a newline. There is no send, clear, or delete button. A two-finger click (secondary click) on an icon deletes that specific dialog. A busy dialog cannot be deleted; removing a queued note attachment is allowed until the task starts.
 
 ## Day 27 verification
 
@@ -212,5 +212,5 @@ npm run lint
 - Questions, history, and retrieved note fragments are processed on this computer.
 - The local index contains full unencrypted text of indexed chunks.
 - Up to 10 dialogs with 80 messages each are saved locally in `rag-chat-state.json`.
-- **Очистить диалог** clears the selected dialog history.
+- A secondary click on a dialog icon deletes that dialog and its history.
 - The plugin does not include telemetry or cloud fallback.

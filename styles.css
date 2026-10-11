@@ -19,7 +19,6 @@
 }
 
 .ai-advent-rag-chat-header,
-.ai-advent-rag-composer-controls,
 .ai-advent-rag-result-header {
   align-items: center;
   display: flex;
@@ -277,7 +276,6 @@
   background: var(--background-primary);
   border-radius: 2px;
 }
-.ai-advent-rag-dialog-actions { display: flex; gap: 2px; flex: 0 0 auto; }
 .ai-advent-rag-note-context {
   display: flex;
   align-items: center;
@@ -293,7 +291,6 @@
   flex: 1;
 }
 .ai-advent-rag-composer { flex: 0 0 auto; }
-.ai-advent-rag-composer-controls { justify-content: flex-end; }
 .ai-advent-rag-source-details { margin-top: 6px; font-size: var(--font-ui-smaller); }
 .ai-advent-rag-source-details summary { cursor: pointer; color: var(--text-muted); }
 .ai-advent-rag-message[hidden] { display: none; }
