@@ -12,7 +12,7 @@ function event(type: string, properties: Record<string, unknown> = {}) {
 function setup() {
   const selectDialog = vi.fn();
   const deleteDialog = vi.fn();
-  const view = new ChatView({} as WorkspaceLeaf, { chatController: { selectDialog, deleteDialog } as unknown as ChatController, openSource: async () => {} });
+  const view = new ChatView({} as WorkspaceLeaf, { chatController: { selectDialog, deleteDialog } as unknown as ChatController, openSource: async () => {}, insertAnswer: vi.fn() });
   const tab = Object.assign(new EventTarget(), { setAttribute: vi.fn(), ownerDocument: { defaultView: { setTimeout, clearTimeout } } });
   const internal = view as unknown as {
     attachDialogActions(tab: HTMLButtonElement, id: string): void;

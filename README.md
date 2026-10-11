@@ -54,6 +54,8 @@ Dialog histories, selection, and attachment paths survive restart in version 2 o
 
 Hold a dialog icon for about half a second to open a panel above it with sliders for temperature, repetition penalty, output length and context size. Settings are saved per dialog and apply to regular questions and `/fmt`. Each submitted request captures its parameters immediately; changing sliders does not alter queued or running requests. Click outside the panel or press Escape to close it. Alt+Enter on a focused dialog icon also opens the panel. Reset restores the formatting defaults. The output limit is capped at half the context window to leave room for input.
 
+The clipboard icon in the bottom-right corner of the composer inserts the active dialog’s latest completed model answer into the current note at the editor cursor (replacing the selection, if present). It is disabled while a request is pending or there is no answer. If no editable note is open, the plugin shows a notice. Insertion uses the normal editor operation and can be undone.
+
 ## Day 27 verification
 
 ```bash

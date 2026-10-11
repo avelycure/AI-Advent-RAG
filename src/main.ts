@@ -20,6 +20,7 @@ import { RetrievalService } from './retrieval/retrieval-service';
 import { DEFAULT_SETTINGS, sanitizeSettings } from './settings/defaults';
 import { AiAdventRagSettingsTab } from './settings/settings-tab';
 import { CHAT_VIEW_TYPE, ChatView } from './ui/chat-view';
+import { insertAnswer } from './ui/insert-answer';
 import { ChatStateRepository } from './ui/chat-state-repository';
 import type {
   ActiveNoteContext,
@@ -290,6 +291,16 @@ export default class AiAdventRagPlugin extends Plugin {
       leaf.view.editor.setCursor(position);
       leaf.view.editor.scrollIntoView({ from: position, to: position }, true);
     }
+  }
+
+  insertAnswer(text: string): void {
+    const active = this.app.workspace.activeEditor;
+    if (active?.file?.extension === 'md' && active.editor) {
+      insertAnswer(active.editor, text);
+      return;
+    }
+    const view = this.app.workspace.getMostRecentLeaf(this.app.workspace.rootSplit)?.view;
+    insertAnswer(view instanceof MarkdownView && view.getMode() === 'source' ? view.editor : undefined, text);
   }
 
   private async readNoteContext(path: string): Promise<ActiveNoteContext> {

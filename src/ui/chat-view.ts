@@ -4,11 +4,13 @@ import type { GroundedCitation, RetrievalDiagnostics, SearchResult } from '../ty
 import { MAX_DIALOGS } from './chat-state';
 import type { ChatController } from './chat-controller';
 import { MODEL_PARAMETER_SLIDERS, sanitizeModelParameters } from '../llm/model-parameters';
+import { lastAssistantAnswer } from './insert-answer';
 
 export const CHAT_VIEW_TYPE = 'ai-advent-rag-chat';
 export interface ChatPluginApi {
   chatController: ChatController;
   openSource(source: SearchResult): Promise<void>;
+  insertAnswer(text: string): void;
 }
 
 export class ChatView extends ItemView {
@@ -290,6 +292,14 @@ export class ChatView extends ItemView {
         submit();
       }
     });
+    const answer = lastAssistantAnswer(dialog.entries);
+    const insert = this.iconButton(composer, 'clipboard-paste', 'Вставить последний ответ в заметку');
+    insert.addClass('ai-advent-rag-insert-answer');
+    insert.disabled = busy || answer === undefined;
+    insert.addEventListener('pointerdown', (event) => { event.preventDefault(); });
+    insert.addEventListener('click', () => this.action(() => {
+      if (answer !== undefined) this.pluginApi.insertAnswer(answer);
+    }));
     this.refreshTabs();
     messages.scrollTop = messages.scrollHeight;
     if (restoreFocus && !busy) { query.focus(); query.setSelectionRange(selection, selection); }

@@ -164,6 +164,7 @@
 }
 
 .ai-advent-rag-composer {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--size-4-2);
@@ -182,6 +183,13 @@
   box-shadow: none;
   background: transparent;
   padding: 4px;
+  padding-right: 36px;
+}
+
+.ai-advent-rag-insert-answer {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
 }
 
 .ai-advent-rag-context-chips {
