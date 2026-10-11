@@ -24,8 +24,6 @@ export interface PluginSettings {
   llmBaseUrl: string;
   llmModel: string;
   llmApiKeySecretId: string;
-  useRag: boolean;
-  useRetrievalEnhancements: boolean;
   retrievalCandidateTopK: number;
   retrievalFinalTopK: number;
   similarityThreshold: number;
@@ -94,6 +92,7 @@ export interface ChunkingComparison {
 }
 
 export interface SearchResult {
+  isActiveNote?: boolean;
   chunk: IndexedChunk;
   score: number;
   sourceId: string;
@@ -120,7 +119,7 @@ export interface LlmMessage {
 }
 
 export interface LlmClient {
-  generate(messages: LlmMessage[], config: LlmConfig): Promise<string>;
+  generate(messages: LlmMessage[], config: LlmConfig, onText?: (text: string) => void): Promise<string>;
   testConnection(config: LlmConfig): Promise<void>;
 }
 
@@ -142,13 +141,21 @@ export interface VectorSearchHit {
   score: number;
 }
 
+export interface ActiveNoteContext {
+  path: string;
+  title: string;
+  content: string;
+  mtime: number;
+}
+export const MAX_ACTIVE_NOTE_CHARACTERS = 12_000;
+
+export type ChatProgress = { kind: 'stage'; text: string } | { kind: 'text'; text: string };
+
 export interface RagAnswer {
   text: string;
   sources: SearchResult[];
   citations: GroundedCitation[];
   groundingStatus: GroundingStatus;
-  taskMemory: TaskMemory;
-  taskMemoryUpdated: boolean;
   usedRag: boolean;
   usedRetrievalEnhancements: boolean;
   modelCalled: boolean;
@@ -212,8 +219,6 @@ export interface RetrievalDiagnostics {
 }
 
 export interface RagPipelineOptions {
-  useRag: boolean;
-  useRetrievalEnhancements: boolean;
   candidateTopK: number;
   finalTopK: number;
   similarityThreshold: number;

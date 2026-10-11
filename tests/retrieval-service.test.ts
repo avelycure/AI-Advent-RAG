@@ -147,6 +147,78 @@ describe('retrieval-only service', () => {
     expect(response.results.map((result) => result.chunk.metadata.chunk_id)).toContain('body');
   });
 
+  it('expands an anchored source with chunks outside the initial candidate top-K', async () => {
+    const service = new RetrievalService(new Embeddings());
+    const anchor = indexedChunk('anchor', [1, 0], { text: '# Target note' });
+    anchor.metadata.source = 'target.md';
+    anchor.metadata.title = 'Target note';
+    const unrelated = indexedChunk('unrelated', [0.8, 0.6]);
+    unrelated.metadata.source = 'other.md';
+    const siblingOutsideTopK = indexedChunk('outside-top-k', [0.4, 0.92], {
+      text: '## Required action\n' + 'The exact answer from the selected source. '.repeat(8),
+    });
+    siblingOutsideTopK.metadata.source = 'target.md';
+    siblingOutsideTopK.metadata.title = 'Target note';
+    siblingOutsideTopK.metadata.section = 'Target note › Required action';
+
+    const response = await service.search(
+      'Target note action',
+      indexSnapshot([anchor, unrelated, siblingOutsideTopK]),
+      {
+        candidateTopK: 2,
+        finalTopK: 2,
+        minimumScore: 0.35,
+        expandRelevantSources: true,
+      },
+    );
+
+    expect(response.candidateCount).toBe(2);
+    expect(response.results.map((result) => result.chunk.metadata.chunk_id)).toEqual([
+      'anchor',
+      'outside-top-k',
+    ]);
+  });
+
+  it('prefers the source with the most specific metadata match before expanding it', async () => {
+    const service = new RetrievalService(new Embeddings());
+    const targetHeader = indexedChunk('side-control-header', [0.62, 0.78]);
+    targetHeader.metadata.source = 'BJJ/Выход из сайд-контроля.md';
+    targetHeader.metadata.title = 'Выход из сайд-контроля';
+    const weakControlMatch = indexedChunk('back-control', [0.64, 0.76]);
+    weakControlMatch.metadata.source = 'BJJ/Контроль спины.md';
+    weakControlMatch.metadata.title = 'Контроль спины';
+    const weakPlanMatch = indexedChunk('october-plan', [0.63, 0.77]);
+    weakPlanMatch.metadata.source = 'BJJ/Итоговые позиционные раунды.md';
+    weakPlanMatch.metadata.title = 'Итоговые позиционные раунды';
+    weakPlanMatch.metadata.section = 'Итоговые позиционные раунды › План на октябрь';
+    const requiredSection = indexedChunk('frames-first', [0.4, 0.92], {
+      text: '## Рамки до движения\nСначала поставить рамки руками, затем пытаться выйти.',
+    });
+    requiredSection.metadata.source = targetHeader.metadata.source;
+    requiredSection.metadata.title = targetHeader.metadata.title;
+    requiredSection.metadata.section = 'Выход из сайд-контроля › Рамки до движения';
+
+    const response = await service.search(
+      'Итоговый план: какое первое действие до выхода из сайд-контроля?',
+      indexSnapshot([targetHeader, weakControlMatch, weakPlanMatch, requiredSection]),
+      {
+        candidateTopK: 3,
+        finalTopK: 2,
+        minimumScore: 0.35,
+        expandRelevantSources: true,
+      },
+    );
+
+    expect(response.candidateCount).toBe(3);
+    expect(response.results.map((result) => result.chunk.metadata.source)).toEqual([
+      targetHeader.metadata.source,
+      targetHeader.metadata.source,
+    ]);
+    expect(response.results.map((result) => result.chunk.metadata.chunk_id)).toContain(
+      'frames-first',
+    );
+  });
+
   it('rejects medium semantic matches without metadata overlap but keeps a named source', async () => {
     const embeddings = new Embeddings();
     const service = new RetrievalService(embeddings);
@@ -203,5 +275,82 @@ describe('retrieval-only service', () => {
     );
 
     expect(response.results[0]?.chunk.metadata.chunk_id).toBe('carbonara');
+  });
+
+  it('does not let a generic metadata word replace a much stronger semantic source', async () => {
+    const service = new RetrievalService(new Embeddings());
+    const expected = indexedChunk('monthly-conclusion', [0.74, 0.67]);
+    expected.metadata.source = 'BJJ/Итоговые позиционные раунды.md';
+    expected.metadata.title = 'Итоговые позиционные раунды';
+    const wrongHeading = indexedChunk('armbar-heading', [0.54, 0.84]);
+    wrongHeading.metadata.source = 'BJJ/Армбар из закрытого гарда.md';
+    wrongHeading.metadata.title = 'Армбар из закрытого гарда';
+    const genericMetadataMatch = indexedChunk('safety-notes', [0.44, 0.9]);
+    genericMetadataMatch.metadata.source = wrongHeading.metadata.source;
+    genericMetadataMatch.metadata.title = wrongHeading.metadata.title;
+    genericMetadataMatch.metadata.section = 'Армбар из закрытого гарда › Заметки безопасности';
+
+    const response = await service.search(
+      'главный вывод месяца сентябрьские заметки BJJ',
+      indexSnapshot([expected, wrongHeading, genericMetadataMatch]),
+      {
+        candidateTopK: 3,
+        finalTopK: 2,
+        minimumScore: 0.35,
+        expandRelevantSources: true,
+      },
+    );
+
+    expect(response.results.map((result) => result.chunk.metadata.source)).toEqual([
+      expected.metadata.source,
+    ]);
+    expect(response.results[0]?.chunk.metadata.chunk_id).toBe('monthly-conclusion');
+  });
+
+  it('does not use an internal section heading to anchor the wrong source', async () => {
+    const service = new RetrievalService(new Embeddings());
+    const expected = indexedChunk('monthly-conclusion', [0.74, 0.67]);
+    expected.metadata.source = 'BJJ/Итоговые позиционные раунды.md';
+    expected.metadata.title = 'Итоговые позиционные раунды';
+    const overview = indexedChunk('overview', [0.66, 0.75]);
+    overview.metadata.source = 'Обзор.md';
+    overview.metadata.title = 'Обзор';
+    overview.metadata.section = 'Месяц чтения, кино, кухни и BJJ';
+
+    const response = await service.search(
+      'главный вывод месяца сентябрьские заметки BJJ',
+      indexSnapshot([expected, overview]),
+      {
+        candidateTopK: 2,
+        finalTopK: 1,
+        minimumScore: 0.35,
+        expandRelevantSources: true,
+      },
+    );
+
+    expect(response.results[0]?.chunk.metadata.chunk_id).toBe('monthly-conclusion');
+  });
+
+  it('keeps meaningful words that merely begin like a generic document term', async () => {
+    const service = new RetrievalService(new Embeddings());
+    const unrelated = indexedChunk('unrelated', [0.9, 0.1]);
+    unrelated.metadata.source = 'Рецепты/Карри.md';
+    unrelated.metadata.title = 'Карри';
+    const named = indexedChunk('texture', [0.6, 0.4]);
+    named.metadata.source = 'Рецепты/Текстура овощей.md';
+    named.metadata.title = 'Текстура овощей';
+
+    const response = await service.search(
+      'Как сохранить текстуру овощей?',
+      indexSnapshot([unrelated, named]),
+      {
+        candidateTopK: 2,
+        finalTopK: 1,
+        minimumScore: 0.35,
+        expandRelevantSources: true,
+      },
+    );
+
+    expect(response.results[0]?.chunk.metadata.chunk_id).toBe('texture');
   });
 });

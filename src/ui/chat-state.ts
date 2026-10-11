@@ -1,15 +1,15 @@
-import { cloneTaskMemory, EMPTY_TASK_MEMORY, sanitizeTaskMemory } from '../rag/task-memory';
+import { randomUUID } from 'node:crypto';
 import type {
   ChatTurn,
   GroundedCitation,
   GroundingStatus,
   RetrievalDiagnostics,
   SearchResult,
-  TaskMemory,
 } from '../types';
 
-export const CHAT_STATE_VERSION = 1;
+export const CHAT_STATE_VERSION = 2;
 export const MAX_PERSISTED_CHAT_ENTRIES = 80;
+export const MAX_DIALOGS = 10;
 
 export type ChatMode = 'direct' | 'rag-basic' | 'rag-enhanced';
 
@@ -23,24 +23,27 @@ export interface ChatEntry extends ChatTurn {
   retrieval?: RetrievalDiagnostics;
 }
 
+export interface ChatDialog {
+  id: string;
+  title: string;
+  contextPath: string | null;
+  entries: ChatEntry[];
+  createdAt: number;
+}
+
 export interface ChatState {
   version: number;
-  entries: ChatEntry[];
-  taskMemories: Record<ChatMode, TaskMemory>;
+  dialogs: ChatDialog[];
+  activeDialogId: string | null;
   updatedAt: number;
 }
 
+export function newChatDialog(contextPath: string | null, title = 'Новый диалог'): ChatDialog {
+  return { id: randomUUID(), title, contextPath, entries: [], createdAt: Date.now() };
+}
+
 export function emptyChatState(): ChatState {
-  return {
-    version: CHAT_STATE_VERSION,
-    entries: [],
-    taskMemories: {
-      direct: cloneTaskMemory(EMPTY_TASK_MEMORY),
-      'rag-basic': cloneTaskMemory(EMPTY_TASK_MEMORY),
-      'rag-enhanced': cloneTaskMemory(EMPTY_TASK_MEMORY),
-    },
-    updatedAt: Date.now(),
-  };
+  return { version: CHAT_STATE_VERSION, dialogs: [], activeDialogId: null, updatedAt: Date.now() };
 }
 
 export function chatMode(useRag: boolean, useRetrievalEnhancements: boolean): ChatMode {
@@ -49,32 +52,48 @@ export function chatMode(useRag: boolean, useRetrievalEnhancements: boolean): Ch
 }
 
 export function sanitizeChatState(value: unknown): ChatState {
-  const fallback = emptyChatState();
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return fallback;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return emptyChatState();
   const record = value as Record<string, unknown>;
-  const memories = record.taskMemories && typeof record.taskMemories === 'object' &&
-    !Array.isArray(record.taskMemories)
-    ? record.taskMemories as Record<string, unknown>
-    : {};
+  const dialogs: ChatDialog[] = [];
+  if (Array.isArray(record.dialogs)) {
+    const ids = new Set<string>();
+    for (const item of record.dialogs) {
+      if (dialogs.length >= MAX_DIALOGS) break;
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+      const dialog = item as Record<string, unknown>;
+      const id = boundedString(dialog.id, 100);
+      if (!id || ids.has(id)) continue;
+      ids.add(id);
+      dialogs.push({
+        id, title: boundedString(dialog.title, 100) ?? 'Диалог',
+        contextPath: validContextPath(dialog.contextPath),
+        entries: sanitizeEntries(dialog.entries), createdAt: finiteNumber(dialog.createdAt) ?? Date.now(),
+      });
+    }
+  } else if (Array.isArray(record.entries) && record.entries.length > 0) {
+    dialogs.push({ ...newChatDialog(null, 'Предыдущий диалог'), entries: sanitizeEntries(record.entries) });
+  }
   return {
-    version: CHAT_STATE_VERSION,
-    entries: sanitizeEntries(record.entries),
-    taskMemories: {
-      direct: sanitizeTaskMemory(memories.direct),
-      'rag-basic': sanitizeTaskMemory(memories['rag-basic']),
-      'rag-enhanced': sanitizeTaskMemory(memories['rag-enhanced']),
-    },
+    version: CHAT_STATE_VERSION, dialogs,
+    activeDialogId: dialogs.some((dialog) => dialog.id === record.activeDialogId)
+      ? record.activeDialogId as string : dialogs[0]?.id ?? null,
     updatedAt: finiteNumber(record.updatedAt) ?? Date.now(),
   };
 }
 
 export function compactChatState(state: ChatState): ChatState {
   return sanitizeChatState({
-    ...state,
-    version: CHAT_STATE_VERSION,
-    entries: state.entries.slice(-MAX_PERSISTED_CHAT_ENTRIES).map(compactEntry),
-    updatedAt: Date.now(),
+    ...state, updatedAt: Date.now(),
+    dialogs: state.dialogs.slice(0, MAX_DIALOGS).map((dialog) => ({
+      ...dialog, entries: dialog.entries.slice(-MAX_PERSISTED_CHAT_ENTRIES).map(compactEntry),
+    })),
   });
+}
+
+function validContextPath(value: unknown): string | null {
+  const path = boundedString(value, 2_000);
+  if (!path || path.startsWith('/') || path.includes('\\') || path.split('/').some((part) => part === '..' || part === '.')) return null;
+  return path.endsWith('.md') ? path : null;
 }
 
 function compactEntry(entry: ChatEntry): ChatEntry {
@@ -96,6 +115,7 @@ function compactSource(source: SearchResult): SearchResult {
     sourceId: source.sourceId,
     score: source.score,
     contextTruncated: source.contextTruncated,
+    isActiveNote: source.isActiveNote,
     chunk: {
       ordinal: source.chunk.ordinal,
       text: '',
@@ -152,6 +172,7 @@ function sanitizeSources(value: unknown): SearchResult[] | undefined {
       sourceId,
       score,
       contextTruncated: booleanOrUndefined(record.contextTruncated),
+      isActiveNote: booleanOrUndefined(record.isActiveNote),
       chunk: {
         ordinal: finiteNumber(chunkRecord.ordinal) ?? 0,
         text: '',
@@ -216,7 +237,6 @@ function sanitizeDiagnostics(value: unknown): RetrievalDiagnostics | undefined {
       : finiteNumber(record.similarityThreshold),
     groundingRepairAttempted: booleanOrUndefined(record.groundingRepairAttempted),
     groundingValidationFailed: booleanOrUndefined(record.groundingValidationFailed),
-    taskMemoryUpdateFailed: booleanOrUndefined(record.taskMemoryUpdateFailed),
   };
 }
 

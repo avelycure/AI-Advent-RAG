@@ -3,7 +3,7 @@
   "name": "AI Advent RAG",
   "version": "0.5.0",
   "minAppVersion": "1.11.4",
-  "description": "Chat with DeepSeek with or without locally retrieved Obsidian note context.",
+  "description": "Local Qwen RAG chat with up to ten independent dialogs, active note context, and a shared model task queue.",
   "author": "avelycure",
   "isDesktopOnly": true
 }

@@ -49,18 +49,23 @@ describe('settings sanitization', () => {
     expect(sanitizeSettings({ fixedChunkSize: 50_000 }).fixedChunkSize).toBe(20_000);
   });
 
-  it('uses DeepSeek with RAG by default and preserves only a boolean RAG switch', () => {
-    expect(DEFAULT_SETTINGS.llmProvider).toBe('deepseek');
-    expect(DEFAULT_SETTINGS.llmBaseUrl).toBe('https://api.deepseek.com');
-    expect(DEFAULT_SETTINGS.llmModel).toBe('deepseek-flash');
-    expect(DEFAULT_SETTINGS.useRag).toBe(true);
-    expect(DEFAULT_SETTINGS.useRetrievalEnhancements).toBe(true);
-    expect(DEFAULT_SETTINGS.similarityThreshold).toBe(0.35);
-    expect(sanitizeSettings({ useRag: false }).useRag).toBe(false);
-    expect(sanitizeSettings({ useRag: 'false' }).useRag).toBe(true);
+  it('uses local Qwen and discards obsolete mode switches', () => {
+    expect(DEFAULT_SETTINGS.llmProvider).toBe('ollama');
+    expect(DEFAULT_SETTINGS.llmBaseUrl).toBe('http://127.0.0.1:11434');
+    expect(DEFAULT_SETTINGS.llmModel).toBe('qwen3.8:27b');
+    expect(sanitizeSettings({ useRag: false, useRetrievalEnhancements: false })).not.toHaveProperty('useRag');
+    expect(sanitizeSettings({ useRag: false, useRetrievalEnhancements: false })).not.toHaveProperty('useRetrievalEnhancements');
     expect(sanitizeSettings({ llmApiKeySecretId: 'untrusted-id' }).llmApiKeySecretId).toBe(
       'ai-advent-rag-deepseek',
     );
+  });
+
+  it('migrates cloud settings to local Qwen and preserves a selected local model', () => {
+    const migrated = sanitizeSettings({ llmProvider: 'deepseek', llmModel: 'deepseek-flash', llmBaseUrl: 'https://api.deepseek.com' });
+    expect(migrated.llmProvider).toBe('ollama');
+    expect(migrated.llmModel).toBe('qwen3.8:27b');
+    expect(migrated.llmBaseUrl).toBe('http://127.0.0.1:11434');
+    expect(sanitizeSettings({ llmProvider: 'ollama', llmModel: 'qwen3:8b' }).llmModel).toBe('qwen3:8b');
   });
 
   it('sanitizes filtering limits and ignores the obsolete topK setting', () => {
@@ -77,7 +82,6 @@ describe('settings sanitization', () => {
     expect(settings.retrievalCandidateTopK).toBe(3);
     expect(settings.retrievalFinalTopK).toBe(3);
     expect(settings.similarityThreshold).toBe(1);
-    expect(settings.useRetrievalEnhancements).toBe(false);
   });
 
   it('supports paragraph, section, and file structural units', () => {

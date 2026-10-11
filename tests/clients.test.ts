@@ -25,6 +25,71 @@ describe('model clients', () => {
     });
   });
 
+  it('generates locally without an API key or reasoning output', async () => {
+    const transport = new FakeTransport({ message: { content: '  Ответ  ', thinking: 'private reasoning' } });
+    const client = new ConfigurableLlmClient(transport);
+    await expect(client.generate([{ role: 'user', content: 'Вопрос' }], {
+      provider: 'ollama', baseUrl: 'http://127.0.0.1:11434', model: 'qwen3.8:27b',
+    })).resolves.toBe('Ответ');
+    expect(transport.requests[1]?.url).toBe('http://127.0.0.1:11434/api/chat');
+    expect(transport.requests[1]?.headers).toBeUndefined();
+    expect(transport.requests[1]?.body).toMatchObject({ think: false, stream: false });
+  });
+
+  it('rejects remote Ollama URLs before sending notes', async () => {
+    const transport = new FakeTransport({});
+    await expect(new ConfigurableLlmClient(transport).generate([], {
+      provider: 'ollama', baseUrl: 'https://example.com', model: 'qwen3.8:27b',
+    })).rejects.toThrow(/локальной Ollama/);
+    expect(transport.requests).toHaveLength(0);
+  });
+
+  it('checks actual generation after finding the local model', async () => {
+    const transport = new FakeTransport({ models: [{ name: 'qwen3.8:27b' }], message: { content: 'ОК' } });
+    await new ConfigurableLlmClient(transport).testConnection({
+      provider: 'ollama', baseUrl: 'http://127.0.0.1:11434', model: 'qwen3.8:27b',
+    });
+    expect(transport.requests.map((request) => request.url)).toEqual([
+      'http://127.0.0.1:11434/api/tags', 'http://127.0.0.1:11434/api/show', 'http://127.0.0.1:11434/api/chat',
+    ]);
+  });
+
+  it('blocks cloud aliases identified by Ollama before sending messages', async () => {
+    const transport = new FakeTransport({ remote_model: 'remote-qwen', remote_host: 'https://ollama.com' });
+    await expect(new ConfigurableLlmClient(transport).generate([{ role: 'user', content: 'Private note' }], {
+      provider: 'ollama', baseUrl: 'http://127.0.0.1:11434', model: 'my-alias',
+    })).rejects.toThrow(/Облачные модели/);
+    expect(transport.requests).toHaveLength(1);
+    expect(transport.requests[0]?.body).toEqual({ model: 'my-alias' });
+  });
+
+  it('streams split NDJSON content and ignores private thinking fields', async () => {
+    const transport = new FakeTransport({});
+    const streaming: HttpTransport = {
+      request: transport.request.bind(transport),
+      async requestStream(_request, onChunk) {
+        onChunk('{"message":{"content":"При');
+        onChunk('вет","thinking":"hidden"},"done":false}\n{"message":{"content":"!"},"done":true}');
+      },
+    };
+    const deltas: string[] = [];
+    await expect(new ConfigurableLlmClient(streaming).generate([], {
+      provider: 'ollama', baseUrl: 'http://127.0.0.1:11434', model: 'qwen3.8:27b',
+    }, (text) => deltas.push(text))).resolves.toBe('Привет!');
+    expect(deltas).toEqual(['Привет', '!']);
+  });
+
+  it('rejects interrupted streams instead of treating partial text as a completed answer', async () => {
+    const transport = new FakeTransport({});
+    const streaming: HttpTransport = {
+      request: transport.request.bind(transport),
+      async requestStream(_request, onChunk) { onChunk('{"message":{"content":"partial"}}\n'); },
+    };
+    await expect(new ConfigurableLlmClient(streaming).generate([], {
+      provider: 'ollama', baseUrl: 'http://127.0.0.1:11434', model: 'qwen3.8:27b',
+    }, () => {})).rejects.toThrow(/прерван/);
+  });
+
   it('builds OpenAI-compatible requests without leaking configuration elsewhere', async () => {
     const transport = new FakeTransport({
       output: [{ content: [{ type: 'output_text', text: 'Answer [S1]' }] }],

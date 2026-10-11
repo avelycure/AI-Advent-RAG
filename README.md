@@ -2,18 +2,13 @@
 
 Desktop-only Obsidian plugin for local semantic search and RAG chat over a vault.
 
-The **Day 25** build turns the verified DeepSeek RAG panel into a persistent mini-chat. It keeps recent dialogue and a structured task memory locally, uses both on every follow-up, and still accepts RAG answers only when their sources and verbatim quotes can be verified against retrieved chunks.
+The **Day 27** build runs the complete chat pipeline on local **Qwen via Ollama**: streaming answers and query rewriting. No cloud model or API key is required. Earlier Day 22–25 sections below describe the historical DeepSeek experiments.
 
 ## Requirements
 
 - Obsidian desktop
 - Node.js 22.12 or newer for development
-- A DeepSeek API key with API billing enabled.
-- [Ollama](https://ollama.com/) with the embedding model installed:
-
-```bash
-ollama pull qwen3-embedding:0.6b
-```
+- Local Ollama with `qwen3.8:27b` (chat) and `qwen3-embedding:0.6b` (search) installed.
 
 ## Development
 
@@ -22,30 +17,44 @@ npm install
 npm run dev
 ```
 
-Copy or symlink the repository into a development vault at:
+Copy the built `main.js`, `manifest.json`, and `styles.css` into `<vault>/.obsidian/plugins/ai-advent-rag`, then enable **AI Advent RAG** in Community plugins.
 
-```text
-<vault>/.obsidian/plugins/ai-advent-rag
+## Usage — Day 27
+
+1. Start Ollama on `http://127.0.0.1:11434`.
+2. Open **Settings → AI Advent RAG**. The default chat model is the locally installed `qwen3.8:27b`; you can enter another installed chat model name.
+3. Select **Проверить подключение** to test both model availability and an actual response. A cold model start can take a few minutes.
+4. Choose folders and rebuild the local index if necessary. Embeddings use `qwen3-embedding:0.6b` independently of the chat model.
+5. Open **Чат с локальной Qwen** using the ribbon or command palette and send a question.
+6. RAG is the only chat mode. Query rewriting and filtering always run before streaming the answer with links to retrieved notes. The old direct and basic RAG switches have been removed.
+
+Existing cloud settings migrate automatically to local Ollama. The plugin does not fall back to a cloud model if Ollama is unavailable. The connection check sends only a test question. Chat history remains in `rag-chat-state.json`; **Очистить диалог** clears only the selected conversation. The generation request disables thinking and sets a 32,768-token context window with up to 4,096 output tokens.
+
+The current chat has no task memory or context sufficiency gate. Even with no retrieved fragments, Qwen generates an answer. Responses are plain text; citations are no longer validated or repaired. The chat shows retrieval stages and streams the actual model response. Existing task memory is discarded when loading old chat state. Historical Day 24–25 sections below describe earlier builds.
+
+## Parallel dialogs and task queue
+
+The panel supports up to **10 dialogs**, each with an independent history and draft. **+ новый диалог** captures the currently active Markdown note. A context chip shows its path; **×** removes the pinned attachment. Removing it leaves normal vault-wide RAG search enabled, so retrieval can still find that note. A dialog without an active Markdown note starts without an attachment. Existing single-chat history migrates into **Предыдущий диалог** without deleting messages.
+
+Pinned notes keep their original identity as the user switches pages. At execution time, the plugin reads the current note text, including the open editor buffer. Up to the first **12,000 characters** are passed to query rewriting and reserved as the first source for the answer; larger notes display a truncation label. Only the attachment path is persisted, not a duplicate of its text. Rename events update the attachment path. If a note disappears, the request reports an error and asks the user to remove the attachment.
+
+One shared FIFO queue executes a complete pipeline at a time: note reading, rewriting, embeddings, retrieval, and streaming generation. Other dialogs show their current queue position. Switching tabs or closing the panel does not interrupt a running request. A dialog permits one outstanding message; other dialogs remain available. Connection tests, standalone searches, and index rebuilds also use this queue. A failed task restores its message for retry and releases the next task.
+
+Dialog histories, selection, and attachment paths survive restart in version 2 of `rag-chat-state.json`. Waiting/running jobs and drafts are transient; an unanswered message after restart is marked as interrupted and can be sent again. Clearing or deleting a busy dialog is disabled; removing a queued note attachment is allowed until the task starts.
+
+## Day 27 verification
+
+```bash
+npm test
+npm run build
+npm run lint
 ```
 
-Then enable **AI Advent RAG** under **Settings → Community plugins**.
+Run the local end-to-end check (synthetic notes, no vault content):
 
-## Usage
-
-1. Start Ollama and make sure `qwen3-embedding:0.6b` is installed.
-2. Open **Settings → AI Advent RAG**.
-3. Choose which notes to index: the whole vault, selected folders only, or the whole vault except selected folders.
-4. Choose **Фиксированный размер** or **По структуре Markdown** as the chunking strategy. Fixed size is the default; its chunk size can be configured from 256 to 20,000 characters. Structural chunking can use paragraphs, Markdown sections, or complete files as units.
-5. Choose the local index format: binary, JSON, SQLite, or FAISS.
-6. Select **Перестроить индекс**.
-7. Save the DeepSeek API key under **API-ключ DeepSeek**. Obsidian keeps the value in `SecretStorage`; plugin data stores only its ID.
-8. Choose **Использовать RAG** for grounded answers or disable it for the baseline mode.
-9. Enable **Фильтрация и переформулирование запроса** for improved retrieval, or disable it to compare with basic RAG. Configure top-K before filtering, the similarity threshold, and top-K after filtering.
-10. Open **Чат с DeepSeek** from the ribbon or command palette and send a question.
-
-Every grounded RAG answer contains the answer plus an explicit **Источники и проверенные цитаты** section with `source`, `section`, `chunk_id`, and a verbatim quote. The plugin checks all four values against the local index before displaying the response. Invalid model output gets one repair attempt; a second failure is replaced by a safe “Не знаю” response. Clicking a source opens the note at the indexed line. The chat also displays the current goal, clarified facts, constraints, and user-defined terms in a **Память задачи** card. Chat history and task memory survive Obsidian restarts until **Очистить чат** is selected. Note changes are reconciled by a weekly incremental update during the night; if Obsidian was closed, the overdue update runs the next time it starts.
-
-Changing the indexed folder selection requires a rebuild. Updating or replacing the local Qwen embedding model also triggers a full rebuild during the next scheduled update.
+```bash
+node scripts/run-day27-smoke.mjs
+```
 
 ## Day 21 — document indexing
 
@@ -199,12 +208,9 @@ npm run lint
 
 ## Privacy
 
-- Embeddings and the vector index stay local.
-- The local index contains the full unencrypted text of indexed chunks.
-- Without RAG, questions and recent mode-specific chat history are sent to the DeepSeek API. Task memory is not updated in this mode.
-- With basic RAG, the question, recent history, and previous task memory are first sent to DeepSeek to update goal, facts, constraints, and terms. The question, updated memory, trusted source metadata, and exact selected fragments are then sent for grounded answer generation.
-- With improved RAG, the same task-memory update is followed by a separate DeepSeek query-rewrite request. The question, recent mode-specific history, updated memory, filtered fragments, vault-relative source paths, sections, and chunk IDs are then sent for answer generation and citation selection.
-- The API key is stored through Obsidian `SecretStorage`, not in plugin `data.json`.
-- Up to 80 recent messages and task memory are saved locally in `rag-chat-state.json`; full retrieved chunk text and vectors are not duplicated into this file.
-- **Очистить чат** deletes the persisted history and all task memories.
-- The plugin does not include telemetry.
+- All active embedding and chat requests go to local Ollama on `127.0.0.1`; no API key is needed.
+- Questions, history, and retrieved note fragments are processed on this computer.
+- The local index contains full unencrypted text of indexed chunks.
+- Up to 10 dialogs with 80 messages each are saved locally in `rag-chat-state.json`.
+- **Очистить диалог** clears the selected dialog history.
+- The plugin does not include telemetry or cloud fallback.

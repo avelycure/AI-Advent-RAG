@@ -1,4 +1,4 @@
-import type { ChatTurn, LlmClient, LlmConfig, TaskMemory } from '../types';
+import type { ActiveNoteContext, ChatTurn, LlmClient, LlmConfig, TaskMemory } from '../types';
 import {
   MAX_REWRITTEN_QUERY_CHARACTERS,
   buildQueryRewriteMessages,
@@ -16,10 +16,11 @@ export async function rewriteSearchQuery(
   llm: LlmClient,
   config: LlmConfig,
   taskMemory?: TaskMemory,
+  activeNote?: ActiveNoteContext,
 ): Promise<QueryRewriteResult> {
   try {
     const response = await llm.generate(
-      buildQueryRewriteMessages(question, history, taskMemory),
+      buildQueryRewriteMessages(question, history, taskMemory, activeNote),
       config,
     );
     const query = normalizeRewrite(response);

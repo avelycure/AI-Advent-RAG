@@ -9,3 +9,5 @@ rag-indexes/
 coverage/
 .idea/
 .vscode/
+rag-chat-state.json
+rag-chat-state.json.tmp

@@ -1,4 +1,4 @@
-import { FileSystemAdapter, MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf } from 'obsidian';
+import { FileSystemAdapter, MarkdownView, Notice, Plugin, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
 import { join } from 'node:path';
 import { OllamaEmbeddingClient } from './embeddings/ollama-embedding-client';
 import { IndexController } from './indexing/index-controller';
@@ -8,9 +8,10 @@ import {
 } from './indexing/index-repository-factory';
 import { ensureIndexDirectory, indexDirectoryPath } from './indexing/index-paths';
 import { discoverFolders, scopeSignature } from './indexing/folder-scope';
-import { ObsidianHttpTransport } from './infrastructure/obsidian-http-transport';
-import { NodeHttpsTransport } from './infrastructure/node-https-transport';
-import { ConfigurableLlmClient, DEEPSEEK_API_BASE_URL } from './llm/llm-client';
+import { LocalStreamingTransport } from './infrastructure/local-streaming-transport';
+import { ModelTaskQueue } from './llm/model-task-queue';
+import { ChatController } from './ui/chat-controller';
+import { ConfigurableLlmClient } from './llm/llm-client';
 import { RagService } from './rag/rag-service';
 import { validateIndexSnapshot } from './rag/validate-index-snapshot';
 import { RetrievalService } from './retrieval/retrieval-service';
@@ -18,8 +19,8 @@ import { DEFAULT_SETTINGS, sanitizeSettings } from './settings/defaults';
 import { AiAdventRagSettingsTab } from './settings/settings-tab';
 import { CHAT_VIEW_TYPE, ChatView } from './ui/chat-view';
 import { ChatStateRepository } from './ui/chat-state-repository';
-import type { ChatState } from './ui/chat-state';
 import type {
+  ActiveNoteContext,
   ChunkingComparison,
   ChatTurn,
   IndexProgress,
@@ -28,7 +29,7 @@ import type {
   RetrievalResponse,
   SearchResult,
   StructureChunkingUnit,
-  TaskMemory,
+  ChatProgress,
 } from './types';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -42,15 +43,20 @@ export default class AiAdventRagPlugin extends Plugin {
   private llmClient!: ConfigurableLlmClient;
   private chatStateRepository!: ChatStateRepository;
   private changeRevision = 0;
+  private readonly modelTransport = new LocalStreamingTransport();
+  private readonly modelQueue = new ModelTaskQueue();
+  private lastActiveNotePath: string | null = null;
+  private rebuildQueued = false;
+  chatController!: ChatController;
 
   async onload(): Promise<void> {
     this.settings = sanitizeSettings(await this.loadData());
     const pluginDirectory = this.pluginDirectoryPath();
     await ensureIndexDirectory(pluginDirectory);
     this.chatStateRepository = new ChatStateRepository(pluginDirectory);
-    const transport = new ObsidianHttpTransport();
+    const transport = this.modelTransport;
     const embeddings = new OllamaEmbeddingClient(transport);
-    this.llmClient = new ConfigurableLlmClient(new NodeHttpsTransport(DEEPSEEK_API_BASE_URL));
+    this.llmClient = new ConfigurableLlmClient(transport);
     this.retrievalService = new RetrievalService(embeddings);
     this.ragService = new RagService(embeddings, this.llmClient);
     this.indexController = new IndexController(
@@ -66,13 +72,33 @@ export default class AiAdventRagPlugin extends Plugin {
       this.settings.indexNeedsRebuild = true;
     }
 
+    this.lastActiveNotePath = this.app.workspace.getActiveFile()?.path ?? null;
+    this.registerEvent(this.app.workspace.on('file-open', (file) => {
+      if (file?.extension === 'md') this.lastActiveNotePath = file.path;
+    }));
+    this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
+      if (this.lastActiveNotePath === oldPath) this.lastActiveNotePath = file.path;
+      else if (this.lastActiveNotePath?.startsWith(`${oldPath}/`)) this.lastActiveNotePath = file.path + this.lastActiveNotePath.slice(oldPath.length);
+      this.chatController.renameNote(oldPath, file.path);
+    }));
+    this.chatController = new ChatController(this.chatStateRepository, this.modelQueue, {
+      activeNotePath: () => {
+        const active = this.app.workspace.getActiveFile();
+        return active?.extension === 'md' ? active.path : this.lastActiveNotePath;
+      },
+      readNote: (path) => this.readNoteContext(path),
+      answer: (question, history, context, onProgress) => this.answerQuestion(question, history, onProgress, context),
+      onError: (message) => { new Notice(message); },
+    });
+    try { await this.chatController.initialize(false); }
+    catch (error) { new Notice(error instanceof Error ? error.message : String(error)); }
     this.registerView(CHAT_VIEW_TYPE, (leaf) => new ChatView(leaf, this));
-    this.addRibbonIcon('message-circle', 'Открыть чат с DeepSeek', () => {
+    this.addRibbonIcon('message-circle', 'Открыть чат с локальной Qwen', () => {
       void this.activateChatView();
     });
     this.addCommand({
       id: 'open-question-panel',
-      name: 'Открыть чат с DeepSeek',
+      name: 'Открыть чат с локальной Qwen',
       callback: () => void this.activateChatView(),
     });
     this.addCommand({
@@ -118,7 +144,7 @@ export default class AiAdventRagPlugin extends Plugin {
   }
 
   isIndexRebuilding(): boolean {
-    return this.indexController.isRebuilding();
+    return this.rebuildQueued || this.indexController.isRebuilding();
   }
 
   availableFolders(): string[] {
@@ -130,7 +156,20 @@ export default class AiAdventRagPlugin extends Plugin {
     this.settings.indexNeedsRebuild = true;
   }
 
+  onunload(): void {
+    this.chatController?.dispose();
+    this.modelTransport.dispose();
+    this.modelQueue.dispose();
+  }
+
   async rebuildIndexWithNotices(): Promise<void> {
+    if (this.rebuildQueued) return;
+    this.rebuildQueued = true;
+    try { await this.modelQueue.enqueue(() => this.performRebuildIndex()); }
+    finally { this.rebuildQueued = false; }
+  }
+
+  private async performRebuildIndex(): Promise<void> {
     const revisionAtStart = this.changeRevision;
     const settingsAtStart: PluginSettings = {
       ...this.settings,
@@ -175,18 +214,19 @@ export default class AiAdventRagPlugin extends Plugin {
   }
 
   async search(query: string): Promise<RetrievalResponse> {
+    return this.modelQueue.enqueue(() => this.performSearch(query));
+  }
+
+  private async performSearch(query: string): Promise<RetrievalResponse> {
     const snapshot = this.validatedSnapshot();
-    const useEnhancements = this.settings.useRetrievalEnhancements;
     return this.retrievalService.search(
       query,
       snapshot,
       {
-        candidateTopK: useEnhancements
-          ? this.settings.retrievalCandidateTopK
-          : this.settings.retrievalFinalTopK,
+        candidateTopK: this.settings.retrievalCandidateTopK,
         finalTopK: this.settings.retrievalFinalTopK,
-        minimumScore: useEnhancements ? this.settings.similarityThreshold : -1,
-        expandRelevantSources: useEnhancements,
+        minimumScore: this.settings.similarityThreshold,
+        expandRelevantSources: true,
       },
       (queryVector, topK) => this.indexController.searchVector(queryVector, topK),
     );
@@ -195,20 +235,15 @@ export default class AiAdventRagPlugin extends Plugin {
   async answerQuestion(
     question: string,
     history: readonly ChatTurn[],
-    useRag: boolean,
-    useRetrievalEnhancements: boolean,
-    taskMemory: TaskMemory,
+    onProgress?: (progress: ChatProgress) => void,
+    activeNote?: ActiveNoteContext,
   ): Promise<RagAnswer> {
-    const apiKey = this.app.secretStorage.getSecret(this.settings.llmApiKeySecretId)?.trim();
-    if (!apiKey) throw new Error('Добавьте API-ключ DeepSeek в настройках плагина.');
-    const snapshot = useRag ? this.validatedSnapshot() : null;
+    const snapshot = this.validatedSnapshot();
     return this.ragService.answer(
       question,
       snapshot,
-      this.deepSeekConfig(apiKey),
+      this.localLlmConfig(),
       {
-        useRag,
-        useRetrievalEnhancements,
         candidateTopK: this.settings.retrievalCandidateTopK,
         finalTopK: this.settings.retrievalFinalTopK,
         similarityThreshold: this.settings.similarityThreshold,
@@ -217,28 +252,9 @@ export default class AiAdventRagPlugin extends Plugin {
       snapshot
         ? (queryVector, topK) => this.indexController.searchVector(queryVector, topK)
         : undefined,
-      taskMemory,
+      onProgress,
+      activeNote,
     );
-  }
-
-  async loadChatState(): Promise<ChatState> {
-    return this.chatStateRepository.load();
-  }
-
-  async saveChatState(state: ChatState): Promise<void> {
-    await this.chatStateRepository.save(state);
-  }
-
-  async clearChatState(): Promise<void> {
-    await this.chatStateRepository.clear();
-  }
-
-  usesRag(): boolean {
-    return this.settings.useRag;
-  }
-
-  usesRetrievalEnhancements(): boolean {
-    return this.settings.useRetrievalEnhancements;
   }
 
   refreshChatViews(): void {
@@ -247,26 +263,8 @@ export default class AiAdventRagPlugin extends Plugin {
     }
   }
 
-  hasDeepSeekApiKey(): boolean {
-    return Boolean(this.app.secretStorage.getSecret(this.settings.llmApiKeySecretId)?.trim());
-  }
-
-  async saveDeepSeekApiKey(value: string): Promise<void> {
-    const secret = value.trim();
-    if (!secret) throw new Error('Введите API-ключ DeepSeek.');
-    this.app.secretStorage.setSecret(this.settings.llmApiKeySecretId, secret);
-    await this.saveSettings();
-  }
-
-  async clearDeepSeekApiKey(): Promise<void> {
-    this.app.secretStorage.setSecret(this.settings.llmApiKeySecretId, '');
-    await this.saveSettings();
-  }
-
-  async testDeepSeekConnection(): Promise<void> {
-    const apiKey = this.app.secretStorage.getSecret(this.settings.llmApiKeySecretId)?.trim();
-    if (!apiKey) throw new Error('Добавьте API-ключ DeepSeek перед проверкой.');
-    await this.llmClient.testConnection(this.deepSeekConfig(apiKey));
+  async testLocalConnection(): Promise<void> {
+    await this.modelQueue.enqueue(() => this.llmClient.testConnection(this.localLlmConfig()));
   }
 
   async openSource(source: SearchResult): Promise<void> {
@@ -281,6 +279,15 @@ export default class AiAdventRagPlugin extends Plugin {
       leaf.view.editor.setCursor(position);
       leaf.view.editor.scrollIntoView({ from: position, to: position }, true);
     }
+  }
+
+  private async readNoteContext(path: string): Promise<ActiveNoteContext> {
+    const file = this.app.vault.getFileByPath(path);
+    if (!file || file.extension !== 'md') throw new Error('Закреплённая заметка не найдена. Уберите её из контекста через крестик.');
+    const openView = this.app.workspace.getLeavesOfType('markdown')
+      .map((leaf) => leaf.view).find((view) => view instanceof MarkdownView && view.file?.path === path);
+    const content = openView instanceof MarkdownView ? openView.editor.getValue() : await this.app.vault.read(file);
+    return { path: file.path, title: file.basename, content, mtime: file.stat.mtime };
   }
 
   private async activateChatView(): Promise<void> {
@@ -310,12 +317,11 @@ export default class AiAdventRagPlugin extends Plugin {
     });
   }
 
-  private deepSeekConfig(apiKey: string) {
+  private localLlmConfig() {
     return {
-      provider: 'deepseek' as const,
-      baseUrl: DEEPSEEK_API_BASE_URL,
+      provider: 'ollama' as const,
+      baseUrl: this.settings.llmBaseUrl,
       model: this.settings.llmModel,
-      apiKey,
     };
   }
 
@@ -326,7 +332,7 @@ export default class AiAdventRagPlugin extends Plugin {
 
   private registerVaultChangeTracking(): void {
     const markDirty = (file: unknown): void => {
-      if (!(file instanceof TFile) || file.extension !== 'md') return;
+      if (!(file instanceof TFolder) && (!(file instanceof TFile) || file.extension !== 'md')) return;
       this.markIndexDirty();
       void this.saveSettings();
     };
@@ -337,6 +343,13 @@ export default class AiAdventRagPlugin extends Plugin {
   }
 
   private async runScheduledRebuildIfDue(catchUp = false): Promise<void> {
+    if (this.rebuildQueued) return;
+    this.rebuildQueued = true;
+    try { await this.modelQueue.enqueue(() => this.performScheduledRebuild(catchUp)); }
+    finally { this.rebuildQueued = false; }
+  }
+
+  private async performScheduledRebuild(catchUp = false): Promise<void> {
     if (this.indexController.isRebuilding()) return;
     if (this.settings.lastIndexedAt === null) return;
     const lastIndexedAt = this.settings.lastIndexedAt;

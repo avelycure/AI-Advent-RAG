@@ -28,13 +28,52 @@ interface ModelsResponse {
 export class ConfigurableLlmClient implements LlmClient {
   constructor(private readonly transport: HttpTransport) {}
 
-  async generate(messages: LlmMessage[], config: LlmConfig): Promise<string> {
+  async generate(messages: LlmMessage[], config: LlmConfig, onText?: (text: string) => void): Promise<string> {
     validateConfig(config);
     if (config.provider === 'ollama') {
+      const modelInfo = await this.transport.request<{ remote_model?: string; remote_host?: string }>({
+        url: joinUrl(config.baseUrl, '/api/show'),
+        method: 'POST',
+        body: { model: config.model },
+      });
+      if (modelInfo.data.remote_model || modelInfo.data.remote_host) {
+        throw new Error('Облачные модели Ollama запрещены. Выберите установленную локальную модель.');
+      }
+      if (onText && this.transport.requestStream) {
+        let pending = '';
+        let answer = '';
+        let done = false;
+        const readLine = (line: string): void => {
+          if (!line.trim()) return;
+          const data = JSON.parse(line) as OllamaChatResponse & { error?: string; done?: boolean };
+          if (data.error) throw new Error(data.error);
+          const delta = data.message?.content ?? '';
+          answer += delta;
+          if (delta) onText(delta);
+          done ||= data.done === true;
+        };
+        await this.transport.requestStream({
+          url: joinUrl(config.baseUrl, '/api/chat'), method: 'POST',
+          body: { model: config.model, messages, stream: true, think: false,
+            options: { num_predict: 4096, num_ctx: 32768, temperature: 0.2 } },
+        }, (chunk) => {
+          pending += chunk;
+          let newline = pending.indexOf('\n');
+          while (newline >= 0) {
+            readLine(pending.slice(0, newline));
+            pending = pending.slice(newline + 1);
+            newline = pending.indexOf('\n');
+          }
+        });
+        readLine(pending);
+        if (!done) throw new Error('Поток ответа модели прерван. Повторите запрос.');
+        if (!answer.trim()) throw new Error('Локальная модель вернула пустой ответ.');
+        return answer.trim();
+      }
       const response = await this.transport.request<OllamaChatResponse>({
         url: joinUrl(config.baseUrl, '/api/chat'),
         method: 'POST',
-        body: { model: config.model, messages, stream: false, options: { num_predict: 1200 } },
+        body: { model: config.model, messages, stream: false, think: false, options: { num_predict: 4096, num_ctx: 32768, temperature: 0.2 } },
       });
       const content = response.data.message?.content?.trim();
       if (!content) throw new Error('The selected Ollama model returned an empty answer.');
@@ -103,6 +142,7 @@ export class ConfigurableLlmClient implements LlmClient {
     if (!modelIds.some((id) => id === config.model || id.startsWith(`${config.model}:`))) {
       throw new Error(`Connection works, but model "${config.model}" was not found.`);
     }
+    await this.generate([{ role: 'user', content: 'Ответь одним словом: ОК' }], config);
   }
 }
 
@@ -132,6 +172,9 @@ function validateConfig(config: LlmConfig): void {
     throw new Error('Адрес модели не должен содержать логин, пароль, параметры или fragment.');
   }
   const loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname);
+  if (config.provider === 'ollama' && !loopback) {
+    throw new Error('Для локальной Ollama разрешён только адрес localhost или 127.0.0.1.');
+  }
   if (url.protocol !== 'https:' && !loopback) {
     throw new Error('Remote model endpoints must use HTTPS to protect API keys and note fragments.');
   }
@@ -143,6 +186,9 @@ function validateConfig(config: LlmConfig): void {
   }
   if (config.provider === 'deepseek' && normalizeUrl(config.baseUrl) !== DEEPSEEK_API_BASE_URL) {
     throw new Error('Для DeepSeek разрешён только официальный API endpoint.');
+  }
+  if (config.provider === 'ollama' && /(?:[:-]cloud)(?:$|[:-])/i.test(config.model)) {
+    throw new Error('Облачные модели Ollama запрещены. Выберите установленную локальную модель.');
   }
   if (!config.model.trim()) throw new Error('Choose or enter an LLM model.');
   if (!['ollama', 'custom'].includes(config.provider) && !config.apiKey) {

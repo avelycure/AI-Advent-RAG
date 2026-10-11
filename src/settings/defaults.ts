@@ -15,7 +15,7 @@ export const PROVIDER_BASE_URLS: Record<LlmProviderId, string> = {
 };
 
 export const PROVIDER_DEFAULT_MODELS: Record<LlmProviderId, string> = {
-  ollama: 'qwen3:8b',
+  ollama: 'qwen3.8:27b',
   openai: 'gpt-5.4-mini-2026-03-17',
   deepseek: 'deepseek-flash',
   glm: 'glm-5.3',
@@ -38,12 +38,10 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   fixedChunkSize: DEFAULT_FIXED_CHUNK_SIZE,
   indexStorageFormat: 'binary',
   activeIndexStorageFormat: 'binary',
-  llmProvider: 'deepseek',
-  llmBaseUrl: PROVIDER_BASE_URLS.deepseek,
-  llmModel: PROVIDER_DEFAULT_MODELS.deepseek,
+  llmProvider: 'ollama',
+  llmBaseUrl: PROVIDER_BASE_URLS.ollama,
+  llmModel: PROVIDER_DEFAULT_MODELS.ollama,
   llmApiKeySecretId: 'ai-advent-rag-deepseek',
-  useRag: true,
-  useRetrievalEnhancements: true,
   retrievalCandidateTopK: DEFAULT_RETRIEVAL_CANDIDATE_TOP_K,
   retrievalFinalTopK: DEFAULT_RETRIEVAL_FINAL_TOP_K,
   similarityThreshold: DEFAULT_SIMILARITY_THRESHOLD,
@@ -55,7 +53,7 @@ export function sanitizeSettings(value: unknown): PluginSettings {
   const raw = isRecord(value) ? value : {};
   const folderMode: PluginSettings['folderMode'] =
     raw.folderMode === 'include' || raw.folderMode === 'exclude' ? raw.folderMode : 'all';
-  const llmProvider: PluginSettings['llmProvider'] = 'deepseek';
+  const llmProvider: PluginSettings['llmProvider'] = 'ollama';
   const selectedFolders = Array.isArray(raw.selectedFolders)
     ? raw.selectedFolders.filter((folder): folder is string => typeof folder === 'string')
     : [];
@@ -88,17 +86,12 @@ export function sanitizeSettings(value: unknown): PluginSettings {
     fixedChunkSize: sanitizeFixedChunkSize(raw.fixedChunkSize),
     indexStorageFormat: sanitizeStorageFormat(raw.indexStorageFormat),
     activeIndexStorageFormat: sanitizeStorageFormat(raw.activeIndexStorageFormat),
-    llmBaseUrl: PROVIDER_BASE_URLS.deepseek,
+    llmBaseUrl: PROVIDER_BASE_URLS.ollama,
     llmModel:
-      typeof raw.llmModel === 'string' && raw.llmProvider === 'deepseek' && raw.llmModel.trim()
+      typeof raw.llmModel === 'string' && raw.llmProvider === 'ollama' && raw.llmModel.trim()
         ? raw.llmModel.trim()
-        : PROVIDER_DEFAULT_MODELS.deepseek,
+        : PROVIDER_DEFAULT_MODELS.ollama,
     llmApiKeySecretId: 'ai-advent-rag-deepseek',
-    useRag: typeof raw.useRag === 'boolean' ? raw.useRag : DEFAULT_SETTINGS.useRag,
-    useRetrievalEnhancements:
-      typeof raw.useRetrievalEnhancements === 'boolean'
-        ? raw.useRetrievalEnhancements
-        : DEFAULT_SETTINGS.useRetrievalEnhancements,
     retrievalCandidateTopK,
     retrievalFinalTopK,
     similarityThreshold: sanitizeSimilarityThreshold(raw.similarityThreshold),

@@ -9,6 +9,47 @@ import type {
 
 const SOURCE_ANCHOR_MARGIN = 0.05;
 const STRONG_SEMANTIC_SCORE = 0.56;
+const GENERIC_METADATA_QUERY_TOKENS = new Set([
+  'документ',
+  'документа',
+  'документе',
+  'документы',
+  'документов',
+  'заметка',
+  'заметке',
+  'заметки',
+  'заметок',
+  'заметку',
+  'записи',
+  'записей',
+  'запись',
+  'источник',
+  'источника',
+  'источники',
+  'раздел',
+  'раздела',
+  'разделе',
+  'разделы',
+  'текст',
+  'текста',
+  'тексте',
+  'тексты',
+  'файл',
+  'файла',
+  'файле',
+  'файлы',
+  'document',
+  'documents',
+  'file',
+  'files',
+  'note',
+  'notes',
+  'section',
+  'sections',
+  'source',
+  'sources',
+  'text',
+]);
 
 export class RetrievalService {
   constructor(private readonly embeddings: EmbeddingClient) {}
@@ -48,9 +89,17 @@ export class RetrievalService {
           .slice(0, candidateTopK)
       : searchVectors(index.chunks, Array.from(normalizedVector), candidateTopK, -1);
     const aboveMinimum = candidates.filter((candidate) => candidate.score >= minimumScore);
-    const metadataMatches = aboveMinimum.filter((candidate) =>
-      hasMetadataTokenOverlap(normalizedQuery, candidate),
+    const metadataMatchCounts = aboveMinimum.map((candidate) => ({
+      candidate,
+      count: metadataTokenOverlapCount(normalizedQuery, candidate),
+    }));
+    const strongestMetadataMatch = Math.max(
+      0,
+      ...metadataMatchCounts.map((match) => match.count),
     );
+    const metadataMatches = metadataMatchCounts
+      .filter((match) => match.count === strongestMetadataMatch && match.count > 0)
+      .map((match) => match.candidate);
     const thresholdMatches = !options.expandRelevantSources
       ? aboveMinimum
       : metadataMatches.length > 0
@@ -59,7 +108,7 @@ export class RetrievalService {
             (candidate) => candidate.score >= Math.max(STRONG_SEMANTIC_SCORE, minimumScore),
           );
     const eligible = options.expandRelevantSources
-      ? expandAnchoredSources(candidates, thresholdMatches)
+      ? expandAnchoredSources(index.chunks, Array.from(normalizedVector), thresholdMatches)
       : thresholdMatches;
     const results = eligible
       .sort((left, right) =>
@@ -79,7 +128,8 @@ export class RetrievalService {
 }
 
 function expandAnchoredSources(
-  candidates: RetrievalResponse['results'],
+  chunks: VectorIndexSnapshot['chunks'],
+  queryVector: readonly number[],
   thresholdMatches: RetrievalResponse['results'],
 ): RetrievalResponse['results'] {
   const bestScore = thresholdMatches[0]?.score;
@@ -89,7 +139,8 @@ function expandAnchoredSources(
       .filter((candidate) => candidate.score >= bestScore - SOURCE_ANCHOR_MARGIN)
       .map((candidate) => candidate.chunk.metadata.source),
   );
-  return candidates.filter((candidate) => anchoredSources.has(candidate.chunk.metadata.source));
+  const sourceChunks = chunks.filter((chunk) => anchoredSources.has(chunk.metadata.source));
+  return searchVectors(sourceChunks, queryVector, sourceChunks.length, -1);
 }
 
 function heuristicScore(candidate: RetrievalResponse['results'][number]): number {
@@ -105,26 +156,29 @@ function heuristicScore(candidate: RetrievalResponse['results'][number]): number
     (isFrontmatter ? 0.08 : 0);
 }
 
-function hasMetadataTokenOverlap(
+function metadataTokenOverlapCount(
   query: string,
   candidate: RetrievalResponse['results'][number],
-): boolean {
-  const queryTokens = tokens(query);
-  if (queryTokens.size === 0) return false;
+): number {
+  const queryTokens = [...tokens(query)].filter(isDistinctiveMetadataQueryToken);
+  if (queryTokens.length === 0) return 0;
   const metadataTokens = tokens([
     candidate.chunk.metadata.source,
     candidate.chunk.metadata.title,
-    candidate.chunk.metadata.section ?? '',
   ].join(' '));
-  return [...queryTokens].some((queryToken) =>
+  return queryTokens.filter((queryToken) =>
     [...metadataTokens].some((metadataToken) => tokensLexicallyMatch(queryToken, metadataToken)),
-  );
+  ).length;
+}
+
+function isDistinctiveMetadataQueryToken(token: string): boolean {
+  return !GENERIC_METADATA_QUERY_TOKENS.has(token);
 }
 
 function tokensLexicallyMatch(left: string, right: string): boolean {
   if (left === right) return true;
   const shorterLength = Math.min(left.length, right.length);
-  if (shorterLength < 6 || Math.abs(left.length - right.length) > 3) return false;
+  if (shorterLength < 5 || Math.abs(left.length - right.length) > 3) return false;
   const requiredPrefixLength = Math.max(5, shorterLength - 2);
   return left.slice(0, requiredPrefixLength) === right.slice(0, requiredPrefixLength);
 }

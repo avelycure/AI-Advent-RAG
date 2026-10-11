@@ -1,265 +1,166 @@
 import { ItemView, Notice, WorkspaceLeaf } from 'obsidian';
 import { citationParts, sourceLinkText } from '../retrieval/citations';
-import type {
-  ChatTurn,
-  GroundedCitation,
-  RagAnswer,
-  RetrievalDiagnostics,
-  SearchResult,
-  TaskMemory,
-} from '../types';
-import { isTaskMemoryEmpty } from '../rag/task-memory';
-import { historyForMode } from './chat-history';
-import {
-  chatMode,
-  emptyChatState,
-  type ChatState,
-} from './chat-state';
+import type { GroundedCitation, RetrievalDiagnostics, SearchResult } from '../types';
+import { MAX_DIALOGS } from './chat-state';
+import type { ChatController } from './chat-controller';
 
 export const CHAT_VIEW_TYPE = 'ai-advent-rag-chat';
-
 export interface ChatPluginApi {
-  answerQuestion(
-    question: string,
-    history: readonly ChatTurn[],
-    useRag: boolean,
-    useRetrievalEnhancements: boolean,
-    taskMemory: TaskMemory,
-  ): Promise<RagAnswer>;
+  chatController: ChatController;
   openSource(source: SearchResult): Promise<void>;
-  indexSummary(): string;
-  usesRag(): boolean;
-  usesRetrievalEnhancements(): boolean;
-  loadChatState(): Promise<ChatState>;
-  saveChatState(state: ChatState): Promise<void>;
-  clearChatState(): Promise<void>;
 }
 
 export class ChatView extends ItemView {
-  private state = emptyChatState();
-  private inFlight = false;
+  private unsubscribe?: () => void;
+  private queryEl?: HTMLTextAreaElement;
+  private statusEl?: HTMLElement;
+  private queueEl?: HTMLElement;
+  private activityEl?: HTMLElement;
+  private liveBody?: HTMLElement;
+  private messagesEl?: HTMLElement;
+  private contextRemoveButton?: HTMLButtonElement;
+  private tabs = new Map<string, HTMLButtonElement>();
 
-  constructor(
-    leaf: WorkspaceLeaf,
-    private readonly pluginApi: ChatPluginApi,
-  ) {
-    super(leaf);
-  }
-
-  getViewType(): string {
-    return CHAT_VIEW_TYPE;
-  }
-
-  getDisplayText(): string {
-    return 'Чат с DeepSeek';
-  }
-
-  getIcon(): string {
-    return 'message-circle';
-  }
+  constructor(leaf: WorkspaceLeaf, private readonly pluginApi: ChatPluginApi) { super(leaf); }
+  getViewType(): string { return CHAT_VIEW_TYPE; }
+  getDisplayText(): string { return 'Диалоги с Qwen'; }
+  getIcon(): string { return 'message-circle'; }
 
   async onOpen(): Promise<void> {
     try {
-      this.state = await this.pluginApi.loadChatState();
+      await this.pluginApi.chatController.initialize();
+      this.unsubscribe = this.pluginApi.chatController.subscribe((kind) => {
+        if (kind === 'change') this.render();
+        else this.refreshProgress();
+      });
+      this.render();
     } catch (error) {
-      new Notice(error instanceof Error ? error.message : String(error));
-      this.state = emptyChatState();
+      this.contentEl.empty();
+      this.contentEl.createDiv({ cls: 'ai-advent-rag-error', text: error instanceof Error ? error.message : String(error) });
     }
-    this.render();
   }
+  async onClose(): Promise<void> { this.unsubscribe?.(); }
+  refreshMode(): void { if (this.unsubscribe) this.render(); }
 
-  async onClose(): Promise<void> {
-    await this.persistState();
+  private action(run: () => void): void {
+    try { run(); } catch (error) { new Notice(error instanceof Error ? error.message : String(error)); }
   }
-
-  refreshMode(): void {
-    if (!this.inFlight) this.render();
+  private tabLabel(id: string, title: string): string {
+    const runtime = this.pluginApi.chatController.runtime(id);
+    return runtime.phase === 'queued' ? `${title} · очередь ${runtime.position}`
+      : runtime.phase === 'running' ? `${title} · ●` : runtime.error ? `${title} · ошибка` : title;
   }
 
   private render(): void {
+    const controller = this.pluginApi.chatController;
+    const dialog = controller.activeDialog;
+    const restoreFocus = this.queryEl === document.activeElement;
+    const selection = this.queryEl?.selectionStart ?? 0;
     const container = this.contentEl;
     container.empty();
     container.addClass('ai-advent-rag-view');
-
+    this.tabs.clear();
+    this.activityEl = undefined;
+    this.liveBody = undefined;
+    this.contextRemoveButton = undefined;
     const header = container.createDiv({ cls: 'ai-advent-rag-chat-header' });
-    header.createEl('h3', { text: 'Чат с DeepSeek' });
-    const clearButton = header.createEl('button', { text: 'Очистить чат' });
-    clearButton.disabled = this.inFlight;
-    clearButton.addEventListener('click', () => {
-      if (this.inFlight) return;
-      void (async () => {
-        this.state = emptyChatState();
-        try {
-          await this.pluginApi.clearChatState();
-        } catch (error) {
-          new Notice(error instanceof Error ? error.message : String(error));
-        }
-        this.render();
-      })();
-    });
-
-    const useRag = this.pluginApi.usesRag();
-    const useRetrievalEnhancements = useRag && this.pluginApi.usesRetrievalEnhancements();
-    const activeMode = chatMode(useRag, useRetrievalEnhancements);
-    const taskMemory = this.state.taskMemories[activeMode];
-    container.createDiv({
-      cls: `ai-advent-rag-mode ${useRag ? 'is-rag' : 'is-direct'}`,
-      text: !useRag
-        ? 'Режим: без RAG'
-        : useRetrievalEnhancements
-          ? 'Режим: RAG с фильтрацией и переформулированием'
-          : 'Режим: базовый RAG без фильтрации и переформулирования',
-    });
-    container.createDiv({
-      cls: 'ai-advent-rag-privacy-note',
-      text: !useRag
-        ? 'В DeepSeek отправляются только вопрос и недавняя история текущего чата. Заметки и локальный индекс не используются.'
-        : useRetrievalEnhancements
-          ? 'DeepSeek обновляет память задачи и переформулирует вопрос для поиска. Затем локальный Qwen ищет кандидатов, similarity-фильтр отбрасывает слабые совпадения, а в DeepSeek отправляются вопрос, история, память, метаданные и выбранные фрагменты. Ответ и цитаты проверяются локально.'
-          : 'DeepSeek обновляет память задачи. По исходному вопросу выполняется локальный поиск без порога релевантности, после чего в DeepSeek отправляются вопрос, история, память, метаданные и выбранные фрагменты. Ответ и цитаты проверяются локально.',
-    });
-    container.createDiv({
-      cls: 'ai-advent-rag-history-note',
-      text: 'История и память задачи сохраняются только локально в папке плагина. Хранится не более 80 последних сообщений.',
-    });
-    if (useRag) {
-      container.createDiv({ cls: 'ai-advent-rag-index-status', text: this.pluginApi.indexSummary() });
-    }
-    const taskMemoryContainer = container.createDiv({ cls: 'ai-advent-rag-task-memory-container' });
-    this.renderTaskMemory(taskMemoryContainer, taskMemory, useRag);
-
-    const messages = container.createDiv({
-      cls: 'ai-advent-rag-messages',
-      attr: { role: 'list', 'aria-busy': this.inFlight ? 'true' : 'false' },
-    });
-    this.renderEntries(messages);
-
-    const composer = container.createDiv({ cls: 'ai-advent-rag-composer' });
-    composer.createEl('label', {
-      text: 'Сообщение',
-      attr: { for: 'ai-advent-rag-question' },
-    });
-    const query = composer.createEl('textarea', {
-      cls: 'ai-advent-rag-question',
-      attr: {
-        id: 'ai-advent-rag-question',
-        placeholder: 'Задайте вопрос по заметкам…',
-        rows: '4',
-        maxlength: '4000',
-      },
-    });
-    const controls = composer.createDiv({ cls: 'ai-advent-rag-composer-controls' });
-    const status = controls.createDiv({
-      cls: 'ai-advent-rag-search-status',
-      attr: { role: 'status', 'aria-live': 'polite' },
-    });
-    const sendButton = controls.createEl('button', {
-      cls: 'mod-cta ai-advent-rag-ask',
-      text: 'Отправить',
-    });
-    const submit = async (): Promise<void> => {
-      const value = query.value.trim();
-      if (!value || this.inFlight) return;
-      const history = historyForMode(this.state.entries, useRag, useRetrievalEnhancements);
-      const currentTaskMemory = this.state.taskMemories[activeMode];
-      this.state.entries.push({
-        role: 'user',
-        content: value,
-        usedRag: useRag,
-        usedRetrievalEnhancements: useRetrievalEnhancements,
+    header.createEl('h3', { text: `Диалоги с Qwen · ${controller.state.dialogs.length}/${MAX_DIALOGS}` });
+    const add = header.createEl('button', { text: '+ новый диалог' });
+    add.disabled = controller.state.dialogs.length >= MAX_DIALOGS;
+    add.addEventListener('click', () => this.action(() => { controller.createDialog(); }));
+    const tabs = container.createDiv({ cls: 'ai-advent-rag-dialog-tabs', attr: { role: 'group', 'aria-label': 'Диалоги' } });
+    for (const item of controller.state.dialogs) {
+      const tab = tabs.createEl('button', {
+        text: this.tabLabel(item.id, item.title),
+        cls: item.id === dialog?.id ? 'is-active' : '',
+        attr: { 'aria-pressed': item.id === dialog?.id ? 'true' : 'false', title: item.title },
       });
-      this.renderEntries(messages);
-      await this.persistState();
-      query.value = '';
-      this.inFlight = true;
-      messages.setAttribute('aria-busy', 'true');
-      clearButton.disabled = true;
-      sendButton.disabled = true;
-      sendButton.setText('Отправка…');
-      status.setText(
-        !useRag
-          ? 'Жду ответ DeepSeek…'
-          : useRetrievalEnhancements
-            ? 'Обновляю память задачи, переформулирую запрос, фильтрую фрагменты и жду ответ DeepSeek…'
-            : 'Обновляю память задачи, ищу фрагменты без фильтрации и жду ответ DeepSeek…',
-      );
-
-      try {
-        const answer = await this.pluginApi.answerQuestion(
-          value,
-          history,
-          useRag,
-          useRetrievalEnhancements,
-          currentTaskMemory,
-        );
-        this.state.taskMemories[activeMode] = answer.taskMemory;
-        this.state.entries.push({
-          role: 'assistant',
-          content: answer.text,
-          sources: answer.sources,
-          citations: answer.citations,
-          groundingStatus: answer.groundingStatus,
-          usedRag: answer.usedRag,
-          usedRetrievalEnhancements: answer.usedRetrievalEnhancements,
-          modelCalled: answer.modelCalled,
-          retrieval: answer.retrieval,
-        });
-        await this.persistState();
-        taskMemoryContainer.empty();
-        this.renderTaskMemory(taskMemoryContainer, answer.taskMemory, useRag);
-        this.renderEntries(messages);
-        status.setText(
-          answer.modelCalled
-            ? answer.usedRag
-              ? answer.groundingStatus === 'grounded'
-                ? `Ответ подтверждён: ${answer.citations.length} источников с проверенными цитатами.`
-                : 'Ответ отклонён из-за слабого или неподтверждённого контекста. Попросите уточнить вопрос.'
-              : 'Ответ без RAG получен.'
-            : answer.usedRetrievalEnhancements
-              ? 'После фильтрации релевантных фрагментов не осталось; DeepSeek выполнил rewriting, но ответ не генерировался.'
-              : 'Релевантные фрагменты не найдены; запрос в DeepSeek не выполнялся.',
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const pending = this.state.entries.at(-1);
-        if (pending?.role === 'user' && pending.content === value) this.state.entries.pop();
-        await this.persistState();
-        this.renderEntries(messages);
-        status.setText('Не удалось получить ответ.');
-        new Notice(message);
-        const errorEntry = messages.createDiv({ cls: 'ai-advent-rag-error', text: message });
-        errorEntry.setAttribute('role', 'alert');
-      } finally {
-        this.inFlight = false;
-        messages.setAttribute('aria-busy', 'false');
-        clearButton.disabled = false;
-        sendButton.disabled = false;
-        sendButton.setText('Отправить');
-        if (
-          this.pluginApi.usesRag() !== useRag ||
-          (useRag && this.pluginApi.usesRetrievalEnhancements() !== useRetrievalEnhancements)
-        ) this.render();
-        else query.focus();
-      }
+      tab.addEventListener('click', () => this.action(() => controller.selectDialog(item.id)));
+      this.tabs.set(item.id, tab);
+    }
+    this.queueEl = container.createDiv({ cls: 'ai-advent-rag-search-status', text: controller.queueSummary });
+    if (!dialog) return;
+    const runtime = controller.runtime(dialog.id);
+    const busy = runtime.phase !== 'idle';
+    const actions = container.createDiv({ cls: 'ai-advent-rag-dialog-actions' });
+    const clear = actions.createEl('button', { text: 'Очистить диалог' });
+    clear.disabled = busy;
+    clear.addEventListener('click', () => this.action(() => controller.clearDialog(dialog.id)));
+    const remove = actions.createEl('button', { text: 'Удалить диалог' });
+    remove.disabled = busy;
+    remove.addEventListener('click', () => this.action(() => controller.deleteDialog(dialog.id)));
+    if (dialog.contextPath) {
+      const context = container.createDiv({ cls: 'ai-advent-rag-note-context' });
+      context.createSpan({ text: `Контекст: ${dialog.contextPath}` });
+      this.contextRemoveButton = context.createEl('button', {
+        text: '×', attr: { 'aria-label': `Убрать ${dialog.contextPath} из контекста`, title: 'Убрать закреплённую заметку' },
+      });
+      this.contextRemoveButton.disabled = runtime.phase === 'running';
+      this.contextRemoveButton.addEventListener('click', () => this.action(() => controller.removeContext(dialog.id)));
+    } else container.createDiv({ cls: 'ai-advent-rag-search-status', text: 'Без закреплённой заметки · поиск по хранилищу включён' });
+    const messages = container.createDiv({ cls: 'ai-advent-rag-messages', attr: { role: 'list', 'aria-busy': busy ? 'true' : 'false' } });
+    this.messagesEl = messages;
+    this.renderEntries(messages);
+    if (busy) {
+      const pending = messages.createDiv({ cls: 'ai-advent-rag-message is-assistant is-pending', attr: { role: 'listitem' } });
+      this.activityEl = pending.createDiv({ cls: 'ai-advent-rag-message-label', text: runtime.status, attr: { role: 'status', 'aria-live': 'polite' } });
+      this.liveBody = pending.createDiv({ cls: 'ai-advent-rag-message-body', text: runtime.text });
+    }
+    if (runtime.error) messages.createDiv({ cls: 'ai-advent-rag-error', text: runtime.error, attr: { role: 'alert' } });
+    const composer = container.createDiv({ cls: 'ai-advent-rag-composer' });
+    const inputId = `ai-advent-rag-question-${dialog.id}`;
+    composer.createEl('label', { text: 'Сообщение', attr: { for: inputId } });
+    const query = composer.createEl('textarea', { cls: 'ai-advent-rag-question',
+      attr: { id: inputId, placeholder: 'Задайте вопрос по заметкам…', rows: '4', maxlength: '4000' } });
+    this.queryEl = query;
+    query.value = controller.drafts.get(dialog.id) ?? '';
+    query.disabled = busy;
+    query.addEventListener('input', () => { controller.drafts.set(dialog.id, query.value); });
+    const controls = composer.createDiv({ cls: 'ai-advent-rag-composer-controls' });
+    this.statusEl = controls.createDiv({ cls: 'ai-advent-rag-search-status', text: runtime.status,
+      attr: { role: 'status', 'aria-live': 'polite' } });
+    const send = controls.createEl('button', { cls: 'mod-cta', text: busy ? 'Запрос отправлен' : 'Отправить' });
+    send.disabled = busy;
+    const submit = (): void => {
+      const value = query.value.trim();
+      if (!value) return;
+      void controller.send(dialog.id, value).catch((error: unknown) => {
+        new Notice(error instanceof Error ? error.message : String(error));
+      });
     };
-
-    sendButton.addEventListener('click', () => void submit());
+    send.addEventListener('click', submit);
     query.addEventListener('keydown', (event) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void submit();
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); submit(); }
     });
+    messages.scrollTop = messages.scrollHeight;
+    if (restoreFocus && !busy) { query.focus(); query.setSelectionRange(selection, selection); }
+  }
+
+  private refreshProgress(): void {
+    const controller = this.pluginApi.chatController;
+    this.queueEl?.setText(controller.queueSummary);
+    for (const dialog of controller.state.dialogs) this.tabs.get(dialog.id)?.setText(this.tabLabel(dialog.id, dialog.title));
+    const dialog = controller.activeDialog;
+    if (!dialog) return;
+    const runtime = controller.runtime(dialog.id);
+    this.contextRemoveButton && (this.contextRemoveButton.disabled = runtime.phase === 'running');
+    this.activityEl?.setText(runtime.status);
+    this.statusEl?.setText(runtime.status);
+    this.liveBody?.setText(runtime.text);
+    if (this.messagesEl && runtime.phase === 'running') this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   }
 
   private renderEntries(container: HTMLElement): void {
     container.empty();
-    if (this.state.entries.length === 0) {
+    if ((this.pluginApi.chatController.activeDialog?.entries.length ?? 0) === 0) {
       container.createDiv({
         cls: 'ai-advent-rag-empty',
-        text: 'Сообщений пока нет. Режим RAG можно изменить в настройках плагина.',
+        text: 'Сообщений пока нет. Задайте вопрос — Qwen найдёт подходящие фрагменты заметок.',
       });
       return;
     }
 
-    for (const entry of this.state.entries) {
+    for (const entry of this.pluginApi.chatController.activeDialog?.entries ?? []) {
       const message = container.createDiv({
         cls: `ai-advent-rag-message is-${entry.role}`,
         attr: { role: 'listitem' },
@@ -274,9 +175,9 @@ export class ChatView extends ItemView {
               : 'RAG · локальный ответ'
             : entry.usedRag
               ? entry.usedRetrievalEnhancements
-                ? 'DeepSeek · RAG с фильтрацией'
-                : 'DeepSeek · базовый RAG'
-              : 'DeepSeek · без RAG',
+                ? 'Qwen (локально) · RAG с фильтрацией'
+                : 'Qwen (локально) · базовый RAG'
+              : 'Qwen (локально) · без RAG',
       });
       const body = message.createDiv({ cls: 'ai-advent-rag-message-body' });
       if (entry.role === 'assistant') {
@@ -336,48 +237,6 @@ export class ChatView extends ItemView {
           : 'Первый ответ модели не прошёл проверку цитат; исправленная версия подтверждена локально.',
       });
     }
-    if (diagnostics.taskMemoryUpdateFailed) {
-      details.createDiv({ text: 'Не удалось обновить память задачи — использована предыдущая версия.' });
-    }
-  }
-
-  private renderTaskMemory(
-    container: HTMLElement,
-    memory: TaskMemory,
-    useRag: boolean,
-  ): void {
-    const details = container.createEl('details', {
-      cls: 'ai-advent-rag-task-memory',
-      attr: { open: '' },
-    });
-    details.createEl('summary', { text: 'Память задачи' });
-    if (!useRag) {
-      details.createDiv({ text: 'Память задачи обновляется только в режиме RAG.' });
-      return;
-    }
-    if (isTaskMemoryEmpty(memory)) {
-      details.createDiv({ text: 'Пока пуста. Цель и ограничения появятся после первого сообщения.' });
-      return;
-    }
-    if (memory.goal) {
-      const goal = details.createDiv({ cls: 'ai-advent-rag-memory-goal' });
-      goal.createEl('strong', { text: 'Цель: ' });
-      goal.createSpan({ text: memory.goal });
-    }
-    this.renderMemoryList(details, 'Уточнено', memory.clarifiedFacts);
-    this.renderMemoryList(details, 'Ограничения', memory.constraints);
-    this.renderMemoryList(
-      details,
-      'Термины',
-      memory.terms.map((term) => `${term.term} — ${term.meaning}`),
-    );
-  }
-
-  private renderMemoryList(container: HTMLElement, title: string, items: readonly string[]): void {
-    if (items.length === 0) return;
-    container.createDiv({ cls: 'ai-advent-rag-memory-label', text: title });
-    const list = container.createEl('ul');
-    for (const item of items) list.createEl('li', { text: item });
   }
 
   private renderGroundedCitations(
@@ -417,18 +276,16 @@ export class ChatView extends ItemView {
   private renderSentSources(
     container: HTMLElement,
     sources: readonly SearchResult[],
-    usedRetrievalEnhancements = false,
+    _usedRetrievalEnhancements = false,
   ): void {
     const section = container.createDiv({ cls: 'ai-advent-rag-sent-sources' });
     section.createDiv({
       cls: 'ai-advent-rag-sent-sources-title',
-      text: 'Фрагменты, отправленные в DeepSeek',
+      text: 'Фрагменты, отправленные в Qwen (локально)',
     });
     if (sources.length === 0) {
       section.createDiv({
-        text: usedRetrievalEnhancements
-          ? 'После фильтрации релевантных фрагментов не осталось; генерация ответа не выполнялась.'
-          : 'Релевантные фрагменты не найдены; запрос в DeepSeek не выполнялся.',
+        text: 'Фрагменты не найдены. Модель получила вопрос и историю диалога.',
       });
       return;
     }
@@ -445,7 +302,9 @@ export class ChatView extends ItemView {
       });
       item.createSpan({
         cls: 'ai-advent-rag-score',
-        text: ` · similarity ${source.score.toFixed(3)} · строки ${source.chunk.metadata.line_start}–${source.chunk.metadata.line_end}${source.contextTruncated ? ' · текст обрезан до лимита' : ''}`,
+        text: source.isActiveNote
+          ? ` · закреплённая заметка${source.contextTruncated ? ' · первые 12 000 символов' : ''}`
+          : ` · similarity ${source.score.toFixed(3)} · строки ${source.chunk.metadata.line_start}–${source.chunk.metadata.line_end}${source.contextTruncated ? ' · текст обрезан до лимита' : ''}`,
       });
     }
   }
@@ -458,11 +317,4 @@ export class ChatView extends ItemView {
     }
   }
 
-  private async persistState(): Promise<void> {
-    try {
-      await this.pluginApi.saveChatState(this.state);
-    } catch (error) {
-      new Notice(`Не удалось сохранить историю чата: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
 }

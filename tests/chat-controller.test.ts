@@ -1,0 +1,145 @@
+import { describe, expect, it, vi } from 'vitest';
+import { ChatController, type ChatControllerApi } from '../src/ui/chat-controller';
+import { ModelTaskQueue } from '../src/llm/model-task-queue';
+import { compactChatState, emptyChatState, type ChatState } from '../src/ui/chat-state';
+import type { RagAnswer } from '../src/types';
+
+const answer = (text: string): RagAnswer => ({ text, sources: [], citations: [], groundingStatus: 'not-applicable',
+  usedRag: true, usedRetrievalEnhancements: true, modelCalled: true });
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+function setup(overrides: Partial<ChatControllerApi> = {}) {
+  const queue = new ModelTaskQueue();
+  let saved: ChatState = emptyChatState();
+  const readNote = vi.fn(async (path: string) => ({ path, title: path, content: 'note text', mtime: 1 }));
+  const api: ChatControllerApi = { activeNotePath: () => 'First.md', readNote,
+    answer: vi.fn(async (question: string) => answer(question)), onError: vi.fn(), ...overrides };
+  const store = { load: async () => saved, save: async (state: ChatState) => { saved = compactChatState(state); } };
+  return { controller: new ChatController(store, queue, api), queue, api, readNote, saved: () => saved };
+}
+
+describe('independent queued dialogs', () => {
+  it('caps dialogs at ten and captures the active note separately for each new dialog', async () => {
+    let path: string | null = 'First.md';
+    const { controller } = setup({ activeNotePath: () => path });
+    await controller.initialize();
+    expect(controller.activeDialog?.contextPath).toBe('First.md');
+    path = 'Second.md';
+    const second = controller.createDialog();
+    expect(second.contextPath).toBe('Second.md');
+    path = null;
+    while (controller.state.dialogs.length < 10) controller.createDialog();
+    expect(controller.activeDialog?.contextPath).toBeNull();
+    expect(() => controller.createDialog()).toThrow(/10/);
+    controller.deleteDialog(second.id);
+    expect(() => controller.createDialog()).not.toThrow();
+  });
+  it('routes ten queued answers and streamed output to their original dialogs after switching tabs', async () => {
+    const gate = deferred();
+    let count = 0;
+    const { controller, saved } = setup({ answer: async (question, history, context, progress) => {
+      expect(history).toEqual([]);
+      expect(context?.path).toBe('First.md');
+      progress({ kind: 'text', text: question });
+      if (count++ === 0) await gate.promise;
+      return answer(`answer ${question}`);
+    } });
+    await controller.initialize();
+    while (controller.state.dialogs.length < 10) controller.createDialog();
+    const ids = controller.state.dialogs.map((dialog) => dialog.id);
+    const jobs = ids.map((id, index) => controller.send(id, `question ${index}`));
+    await vi.waitFor(() => expect(controller.runtime(ids[0]!).text).toBe('question 0'));
+    expect(controller.runtime(ids[9]!).phase).toBe('queued');
+    expect(controller.runtime(ids[9]!).position).toBe(9);
+    controller.selectDialog(ids[5]!);
+    expect(controller.runtime(ids[5]!).text).toBe('');
+    gate.resolve();
+    await Promise.all(jobs);
+    controller.state.dialogs.forEach((dialog, index) => {
+      expect(dialog.entries.map((entry) => entry.content)).toEqual([`question ${index}`, `answer question ${index}`]);
+      expect(controller.runtime(dialog.id).phase).toBe('idle');
+    });
+    expect(saved().dialogs.every((dialog) => dialog.entries.length === 2)).toBe(true);
+    expect(controller.state.activeDialogId).toBe(ids[5]);
+  });
+  it('removes pinned context before a queued task starts and prevents deleting a busy dialog', async () => {
+    const { controller, queue, api, readNote } = setup();
+    await controller.initialize();
+    const gate = deferred();
+    const blocking = queue.enqueue(() => gate.promise);
+    const dialog = controller.activeDialog!;
+    const request = controller.send(dialog.id, 'Question');
+    expect(controller.runtime(dialog.id).phase).toBe('queued');
+    expect(() => controller.deleteDialog(dialog.id)).toThrow(/Дождитесь/);
+    controller.removeContext(dialog.id);
+    gate.resolve();
+    await blocking;
+    await request;
+    expect(readNote).not.toHaveBeenCalled();
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- inspect a mock without invoking the method
+    expect(api.answer).toHaveBeenCalledWith('Question', [], undefined, expect.any(Function));
+  });
+  it('isolates histories and restores the failed message for retry while the queue continues', async () => {
+    const { controller } = setup({ answer: async (question, history) => {
+      if (question === 'fail') throw new Error('offline');
+      expect(history).toEqual([]);
+      return answer('ok');
+    } });
+    await controller.initialize();
+    const first = controller.activeDialog!;
+    const second = controller.createDialog();
+    await Promise.all([controller.send(first.id, 'fail'), controller.send(second.id, 'success')]);
+    expect(first.entries).toHaveLength(0);
+    expect(controller.drafts.get(first.id)).toBe('fail');
+    expect(controller.runtime(first.id).error).toBe('offline');
+    expect(second.entries).toHaveLength(2);
+  });
+  it('loads existing dialogs on startup but captures the active page only when the first dialog opens', async () => {
+    let path = 'Startup.md';
+    const { controller } = setup({ activeNotePath: () => path });
+    await controller.initialize(false);
+    expect(controller.state.dialogs).toHaveLength(0);
+    path = 'Opened.md';
+    await controller.initialize();
+    expect(controller.activeDialog?.contextPath).toBe('Opened.md');
+  });
+
+  it('updates pinned note paths when a parent folder is renamed', async () => {
+    const { controller } = setup({ activeNotePath: () => 'Projects/Sub/Note.md' });
+    await controller.initialize();
+    controller.renameNote('Projects', 'Archive');
+    expect(controller.activeDialog?.contextPath).toBe('Archive/Sub/Note.md');
+  });
+  it('does not save a late answer after disposal over the next plugin instance', async () => {
+    const gate = deferred();
+    const { controller, saved } = setup({ answer: async () => { await gate.promise; return answer('late'); } });
+    await controller.initialize();
+    const id = controller.activeDialog!.id;
+    const request = controller.send(id, 'pending');
+    await vi.waitFor(() => expect(controller.runtime(id).phase).toBe('running'));
+    controller.dispose();
+    const before = JSON.stringify(saved());
+    gate.resolve();
+    await request;
+    expect(JSON.stringify(saved())).toBe(before);
+    expect(saved().dialogs[0]?.entries).toHaveLength(1);
+  });
+
+  it('rejects duplicate sends in the same dialog and retains note pinning after reload', async () => {
+    const gate = deferred();
+    const { controller, api, saved } = setup({ answer: async () => { await gate.promise; return answer('ok'); } });
+    await controller.initialize();
+    const dialog = controller.activeDialog!;
+    const request = controller.send(dialog.id, 'hello');
+    await expect(controller.send(dialog.id, 'again')).rejects.toThrow(/уже есть запрос/);
+    gate.resolve();
+    await request;
+    const restored = new ChatController({ load: async () => saved(), save: async () => {} }, new ModelTaskQueue(), api);
+    await restored.initialize();
+    expect(restored.activeDialog?.contextPath).toBe('First.md');
+    expect(restored.activeDialog?.entries).toHaveLength(2);
+  });
+});

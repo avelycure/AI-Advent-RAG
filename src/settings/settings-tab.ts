@@ -40,7 +40,7 @@ export class AiAdventRagSettingsTab extends PluginSettingTab {
     new Setting(containerEl).setName('Индекс').setHeading();
 
     new Setting(containerEl).setName('Локальные эмбеддинги').setDesc(
-      'Для индекса и поиска используется qwen3-embedding:0.6b через локальную Ollama. В режиме RAG найденные фрагменты отправляются в DeepSeek только при отправке вопроса.',
+      'Для индекса и поиска используется qwen3-embedding:0.6b через локальную Ollama. В режиме RAG найденные фрагменты отправляются в локальную Qwen только при отправке вопроса.',
     );
 
     let finalTopKSlider: SliderComponent | undefined;
@@ -216,31 +216,23 @@ export class AiAdventRagSettingsTab extends PluginSettingTab {
 
     if (this.plugin.settings.folderMode !== 'all') this.renderFolderSelection(containerEl);
 
-    new Setting(containerEl).setName('Чат с DeepSeek').setHeading();
+    new Setting(containerEl).setName('Чат с локальной Qwen').setHeading();
     new Setting(containerEl)
-      .setName('Использовать RAG')
+      .setName('Как работает текущий режим')
       .setDesc(
-        this.plugin.settings.useRag
-          ? 'Вопрос сначала ищется в локальном индексе. Затем вопрос и показанные в чате фрагменты заметок отправляются в DeepSeek.'
-          : 'В DeepSeek отправляются только вопрос и недавняя история текущего чата. Индекс и заметки не используются.',
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.useRag)
-          .onChange(async (value) => {
-            this.plugin.settings.useRag = value;
-            await this.plugin.saveSettings();
-            this.plugin.refreshChatViews();
-            this.display();
-          }),
+        'Qwen переформулирует вопрос, локальный поиск отбирает фрагменты заметок. Вопрос, история и найденные фрагменты передаются локальной Qwen. Ответ выводится по мере генерации, даже если фрагменты не найдены.',
       );
-
     new Setting(containerEl)
-      .setName('Модель DeepSeek')
-      .setDesc('По умолчанию используется экономичная модель deepseek-flash в режиме без рассуждений.')
+      .setName('История чата')
+      .setDesc(
+        'История диалога сохраняется только локально в папке плагина. Можно создать до 10 диалогов. В каждом хранится до 80 последних сообщений; «Очистить диалог» очищает только выбранную историю. Запросы к модели выполняются по очереди.',
+      );
+    new Setting(containerEl)
+      .setName('Модель локальной Qwen')
+      .setDesc('Имя установленной в Ollama модели для чата. По умолчанию qwen3.8:27b; API-ключ не нужен.')
       .addText((text) =>
         text
-          .setPlaceholder('deepseek-flash')
+          .setPlaceholder('qwen3.8:27b')
           .setValue(this.plugin.settings.llmModel)
           .onChange(async (value) => {
             const model = value.trim();
@@ -250,92 +242,24 @@ export class AiAdventRagSettingsTab extends PluginSettingTab {
           }),
       );
 
-    let tokenDraft = '';
-    let saveTokenButton: ButtonComponent;
-    const tokenSetting = new Setting(containerEl)
-      .setName('API-ключ DeepSeek')
-      .setDesc(
-        'Ключ хранится локально в SecretStorage Obsidian и не записывается в data.json. Используется официальный DeepSeek Chat Completions API.',
-      );
-    tokenSetting
-      .addText((text) => {
-        text.inputEl.type = 'password';
-        text.inputEl.autocomplete = 'off';
-        text.setPlaceholder(
-          this.plugin.hasDeepSeekApiKey() ? 'Ключ сохранён локально' : 'Вставьте ключ DeepSeek API',
-        );
-        text.onChange((value) => {
-          tokenDraft = value;
-          saveTokenButton?.setDisabled(!value.trim());
-        });
-      })
-      .addButton((button) => {
-        saveTokenButton = button;
-        button
-          .setButtonText('Сохранить токен')
-          .setCta()
-          .setDisabled(true)
-          .onClick(async () => {
-            try {
-              await this.plugin.saveDeepSeekApiKey(tokenDraft);
-              new Notice('API-ключ DeepSeek сохранён локально.');
-              this.display();
-            } catch (error) {
-              new Notice(error instanceof Error ? error.message : String(error));
-            }
-          });
-      })
-      .addButton((button) =>
-        button
-          .setButtonText('Удалить токен')
-          .setWarning()
-          .setDisabled(!this.plugin.hasDeepSeekApiKey())
-          .onClick(async () => {
-            await this.plugin.clearDeepSeekApiKey();
-            new Notice('API-ключ DeepSeek удалён.');
-            this.display();
-          }),
-      );
-
     new Setting(containerEl)
-      .setName('Проверка DeepSeek')
-      .setDesc('Проверяет доступ к выбранной модели через официальный DeepSeek API без текста заметок.')
+      .setName('Проверка локальной Qwen')
+      .setDesc('Отправляет тестовый вопрос в локальную Ollama без текста заметок. Первый запуск модели может занять несколько минут.')
       .addButton((button) =>
-        button
-          .setButtonText('Проверить подключение')
-          .setDisabled(!this.plugin.hasDeepSeekApiKey())
-          .onClick(async () => {
-            button.setDisabled(true).setButtonText('Проверка…');
-            try {
-              await this.plugin.testDeepSeekConnection();
-              new Notice('DeepSeek API доступен, выбранная модель отвечает.');
-            } catch (error) {
-              new Notice(error instanceof Error ? error.message : String(error));
-            } finally {
-              this.display();
-            }
-          }),
+        button.setButtonText('Проверить подключение').onClick(async () => {
+          button.setDisabled(true).setButtonText('Проверка…');
+          try {
+            await this.plugin.testLocalConnection();
+            new Notice('Локальная Qwen отвечает.');
+          } catch (error) {
+            new Notice(error instanceof Error ? error.message : String(error));
+          } finally {
+            this.display();
+          }
+        }),
       );
 
     new Setting(containerEl).setName('Улучшение поиска для RAG').setHeading();
-    new Setting(containerEl)
-      .setName('Фильтрация и переформулирование запроса')
-      .setDesc(
-        this.plugin.settings.useRetrievalEnhancements
-          ? 'DeepSeek превращает вопрос в самостоятельный поисковый запрос, затем similarity-порог отбрасывает слабые совпадения. Для ответа выполняется отдельный запрос к DeepSeek.'
-          : 'Используется исходный вопрос и базовый векторный поиск без порога релевантности. Этот режим нужен для сравнения качества.',
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.useRetrievalEnhancements)
-          .onChange(async (value) => {
-            this.plugin.settings.useRetrievalEnhancements = value;
-            await this.plugin.saveSettings();
-            this.plugin.refreshChatViews();
-            this.display();
-          }),
-      );
-
     new Setting(containerEl)
       .setName('Количество кандидатов до фильтрации (top-K)')
       .setDesc('Сколько наиболее близких чанков получить из локального векторного индекса до применения порога.')
@@ -383,7 +307,7 @@ export class AiAdventRagSettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Количество результатов после фильтрации (top-K)')
-      .setDesc('Максимальное количество прошедших порог чанков, которые можно отправить в DeepSeek.')
+      .setDesc('Максимальное количество прошедших порог чанков, которые можно отправить в локальную Qwen.')
       .addSlider((slider) =>
         (finalTopKSlider = slider)
           .setLimits(

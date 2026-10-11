@@ -13,6 +13,7 @@ export interface HttpResponse<T> {
 }
 
 export interface HttpTransport {
+  requestStream?(request: HttpRequest, onChunk: (chunk: string) => void): Promise<void>;
   request<T>(request: HttpRequest): Promise<HttpResponse<T>>;
 }
 

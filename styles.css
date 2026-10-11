@@ -5,50 +5,14 @@
   padding: var(--size-4-3);
 }
 
-.ai-advent-rag-index-status,
-.ai-advent-rag-privacy-note,
 .ai-advent-rag-error {
   color: var(--text-muted);
   font-size: var(--font-ui-small);
 }
 
-.ai-advent-rag-privacy-note {
-  border-left: 3px solid var(--interactive-accent);
-  padding-left: var(--size-4-3);
-}
-
-.ai-advent-rag-history-note,
 .ai-advent-rag-search-status {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
-}
-
-.ai-advent-rag-task-memory {
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s);
-  font-size: var(--font-ui-small);
-  padding: var(--size-4-2) var(--size-4-3);
-}
-
-.ai-advent-rag-task-memory summary {
-  cursor: pointer;
-  font-weight: var(--font-semibold);
-}
-
-.ai-advent-rag-task-memory > div,
-.ai-advent-rag-task-memory > ul {
-  margin-top: var(--size-4-2);
-}
-
-.ai-advent-rag-task-memory ul {
-  margin-bottom: 0;
-  padding-left: var(--size-4-5);
-}
-
-.ai-advent-rag-memory-label {
-  color: var(--text-muted);
-  font-weight: var(--font-semibold);
 }
 
 .ai-advent-rag-chat-header,
@@ -62,20 +26,6 @@
 
 .ai-advent-rag-chat-header h3 {
   margin: 0;
-}
-
-.ai-advent-rag-mode {
-  align-self: flex-start;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s);
-  font-size: var(--font-ui-smaller);
-  font-weight: var(--font-semibold);
-  padding: var(--size-4-1) var(--size-4-2);
-}
-
-.ai-advent-rag-mode.is-rag {
-  border-color: var(--interactive-accent);
-  color: var(--interactive-accent);
 }
 
 .ai-advent-rag-messages {
@@ -248,4 +198,48 @@
 
 .ai-advent-rag-folder-list .setting-item {
   padding-block: var(--size-4-2);
+}
+
+.ai-advent-rag-message.is-pending .ai-advent-rag-message-label::after {
+  content: ' ●';
+  color: var(--interactive-accent);
+  animation: ai-advent-rag-busy 1.2s ease-in-out infinite;
+}
+@keyframes ai-advent-rag-busy {
+  50% { opacity: 0.25; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-advent-rag-message.is-pending .ai-advent-rag-message-label::after { animation: none; }
+}
+
+.ai-advent-rag-dialog-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-1);
+  margin-bottom: var(--size-4-2);
+}
+.ai-advent-rag-dialog-tabs button {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ai-advent-rag-dialog-tabs button.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+.ai-advent-rag-dialog-actions {
+  display: flex;
+  gap: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+}
+.ai-advent-rag-note-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+  background: var(--background-secondary);
+  border-radius: var(--radius-s);
+  padding: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+  overflow-wrap: anywhere;
 }
