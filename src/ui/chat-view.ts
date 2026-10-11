@@ -4,6 +4,7 @@ import type { GroundedCitation, RetrievalDiagnostics, SearchResult } from '../ty
 import { MAX_DIALOGS } from './chat-state';
 import type { ChatController } from './chat-controller';
 import { MODEL_PARAMETER_SLIDERS, sanitizeModelParameters } from '../llm/model-parameters';
+import { analyticsRows } from './dialog-analytics';
 import { lastAssistantAnswer } from './insert-answer';
 
 export const CHAT_VIEW_TYPE = 'ai-advent-rag-chat';
@@ -23,6 +24,7 @@ export class ChatView extends ItemView {
   private tabs = new Map<string, HTMLButtonElement>();
   private draggedDialogId?: string;
   private closeModelMenu?: () => void;
+  private analyticsOpen = new Set<string>();
   private holdTimers = new Set<number>();
 
   constructor(leaf: WorkspaceLeaf, private readonly pluginApi: ChatPluginApi) { super(leaf); }
@@ -300,6 +302,33 @@ export class ChatView extends ItemView {
         submit();
       }
     });
+    const analytics = this.iconButton(composer, 'chart-no-axes-combined', 'Аналитика диалога');
+    analytics.addClass('ai-advent-rag-analytics-toggle');
+    const panel = container.createDiv({ cls: 'ai-advent-rag-analytics' });
+    panel.id = `ai-advent-analytics-${dialog.id}`;
+    analytics.setAttribute('aria-controls', panel.id);
+    const updateAnalytics = (): void => {
+      const open = this.analyticsOpen.has(dialog.id);
+      analytics.setAttribute('aria-expanded', String(open));
+      panel.hidden = !open;
+      panel.empty();
+      if (!open) return;
+      panel.createDiv({ cls: 'ai-advent-rag-analytics-title', text: 'Аналитика диалога' });
+      const rows = analyticsRows(dialog.entries);
+      if (!rows.length) panel.createDiv({ text: 'Данные появятся после следующего ответа модели.' });
+      for (const [label, value] of rows) {
+        const row = panel.createDiv({ cls: 'ai-advent-rag-analytics-row' });
+        row.createSpan({ text: label }); row.createSpan({ text: value });
+      }
+      if (rows.length) panel.createDiv({ cls: 'ai-advent-rag-analytics-note', text: 'Время первого токена — от отправки финального запроса в Qwen. Память — снимок модели, не пик; GPU входит в её объём. CPU и энергопотребление не измеряются. Итоги учитывают сохранённые ответы с аналитикой, включая служебные вызовы RAG.' });
+    };
+    analytics.addEventListener('pointerdown', (event) => event.preventDefault());
+    analytics.addEventListener('click', () => {
+      if (this.analyticsOpen.has(dialog.id)) this.analyticsOpen.delete(dialog.id);
+      else this.analyticsOpen.add(dialog.id);
+      updateAnalytics();
+    });
+    updateAnalytics();
     this.refreshTabs();
     messages.scrollTop = messages.scrollHeight;
     if (restoreFocus && !busy) { query.focus(); query.setSelectionRange(selection, selection); }

@@ -1,12 +1,18 @@
 import type { HttpTransport } from '../infrastructure/http';
 import { joinUrl } from '../infrastructure/http';
-import type { LlmClient, LlmConfig, LlmMessage } from '../types';
+import type { LlmClient, LlmConfig, LlmMessage, ModelMetrics } from '../types';
 
 export const GLM_API_BASE_URL = 'https://api.z.ai/api/paas/v4';
 export const OPENAI_API_BASE_URL = 'https://api.openai.com/v1';
 export const DEEPSEEK_API_BASE_URL = 'https://api.deepseek.com';
 
 interface OllamaChatResponse {
+  prompt_eval_count?: number;
+  eval_count?: number;
+  total_duration?: number;
+  load_duration?: number;
+  prompt_eval_duration?: number;
+  eval_duration?: number;
   done_reason?: string;
   message?: { content?: string };
 }
@@ -41,10 +47,30 @@ export class ConfigurableLlmClient implements LlmClient {
       if (modelInfo.data.remote_model || modelInfo.data.remote_host) {
         throw new Error('Облачные модели Ollama запрещены. Выберите установленную локальную модель.');
       }
+      const started = performance.now();
+      let firstTokenMs: number | undefined;
+      const report = async (data: OllamaChatResponse): Promise<void> => {
+        if (!config.onMetrics) return;
+        const number = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+        const ms = (value: unknown): number | undefined => { const n = number(value); return n === undefined ? undefined : n / 1e6; };
+        const metrics: ModelMetrics = { model: config.model, inputTokens: number(data.prompt_eval_count),
+          outputTokens: number(data.eval_count), totalMs: ms(data.total_duration), loadMs: ms(data.load_duration),
+          promptMs: ms(data.prompt_eval_duration), generationMs: ms(data.eval_duration), firstTokenMs };
+        try {
+          const snapshot = await this.transport.request<{ models?: Array<{ name?: string; model?: string; size?: number; size_vram?: number }> }>({
+            url: joinUrl(config.baseUrl, '/api/ps'), signal: config.signal, timeoutMs: 3000,
+          });
+          const model = snapshot.data.models?.find((item) => (item.model ?? item.name) === config.model || (item.model ?? item.name) === `${config.model}:latest`);
+          metrics.memoryBytes = number(model?.size);
+          metrics.vramBytes = number(model?.size_vram);
+        } catch { /* Optional telemetry must not discard a successful answer. */ }
+        config.onMetrics(metrics);
+      };
       if (onText && this.transport.requestStream) {
         let pending = '';
         let answer = '';
         let done = false;
+        let finalData: OllamaChatResponse | undefined;
         const readLine = (line: string): void => {
           if (!line.trim()) return;
           const data = JSON.parse(line) as OllamaChatResponse & { error?: string; done?: boolean };
@@ -54,7 +80,8 @@ export class ConfigurableLlmClient implements LlmClient {
           }
           const delta = data.message?.content ?? '';
           answer += delta;
-          if (delta) onText(delta);
+          if (delta) { firstTokenMs ??= performance.now() - started; onText(delta); }
+          if (data.done) finalData = data;
           done ||= data.done === true;
         };
         await this.transport.requestStream({
@@ -74,6 +101,7 @@ export class ConfigurableLlmClient implements LlmClient {
         readLine(pending);
         if (!done) throw new Error('Поток ответа модели прерван. Повторите запрос.');
         if (!answer.trim()) throw new Error('Локальная модель вернула пустой ответ.');
+        if (finalData) await report(finalData);
         return answer.trim();
       }
       const response = await this.transport.request<OllamaChatResponse>({
@@ -87,6 +115,7 @@ export class ConfigurableLlmClient implements LlmClient {
         throw new Error('Ответ достиг лимита длины. Форматирование не завершено; разделите страницу на части.');
       }
       if (!content) throw new Error('The selected Ollama model returned an empty answer.');
+      await report(response.data);
       return content;
     }
 

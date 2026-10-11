@@ -13,11 +13,17 @@ function model() {
 }
 
 describe('vault formatting skill', () => {
-  it('recognizes only slash commands, including the format alias and extra instructions', () => {
+  it('recognizes slash commands and explicit requests to apply fmt', () => {
     expect(isFormatCommand('/fmt')).toBe(true);
     expect(isFormatCommand(' /format сохрани заголовки')).toBe(true);
     expect(isFormatCommand('/fmtx')).toBe(false);
     expect(isFormatCommand('Расскажи про fmt')).toBe(false);
+    expect(isFormatCommand('Отформатируй заметку скиллом fmt')).toBe(true);
+    expect(isFormatCommand('Пожалуйста, примени /fmt к выделению')).toBe(true);
+    expect(isFormatCommand('Используй скилл fmt для форматирования')).toBe(true);
+    expect(isFormatCommand('Отформатируй заметку')).toBe(false);
+    expect(isFormatCommand('Почему fmt не работает?')).toBe(false);
+    expect(isFormatCommand('Отформатируй с fmtx')).toBe(false);
   });
   it('sends the complete selected note and skill without history or retrieval and applies formatting options', async () => {
     const { llm, generate } = model();
@@ -26,6 +32,7 @@ describe('vault formatting skill', () => {
     const [messages, options] = generate.mock.calls[0]! as unknown as [Array<{ role: string; content: string }>, LlmConfig];
     expect(messages).toHaveLength(2);
     expect(messages[0]?.content).not.toContain('description:');
+    expect(messages[0]?.content).toContain('Правила скилла fmt уже переданы');
     expect(messages[1]?.content).toContain('сохрани заголовки');
     expect(JSON.parse(messages[1]!.content.split('Выбранная страница в формате JSON:\n')[1]!)).toEqual(note);
     expect(options.options).toEqual({ temperature: 0.1, repeat_penalty: 1, num_predict: 8192, num_ctx: 32768 });

@@ -107,7 +107,26 @@ export interface IndexProgress {
   currentPath?: string;
 }
 
+export interface ModelMetrics {
+  model: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalMs?: number;
+  loadMs?: number;
+  promptMs?: number;
+  generationMs?: number;
+  firstTokenMs?: number;
+  memoryBytes?: number;
+  vramBytes?: number;
+}
+export interface DialogAnalytics {
+  calls: ModelMetrics[];
+  elapsedMs: number;
+  queueMs: number;
+}
+
 export interface LlmConfig {
+  onMetrics?: (metrics: ModelMetrics) => void;
   requireComplete?: boolean;
   options?: { temperature?: number; repeat_penalty?: number; num_predict?: number; num_ctx?: number };
   signal?: AbortSignal;
@@ -158,6 +177,7 @@ export const MAX_ACTIVE_NOTE_CHARACTERS = 12_000;
 export type ChatProgress = { kind: 'stage'; text: string } | { kind: 'text'; text: string };
 
 export interface RagAnswer {
+  analytics?: DialogAnalytics;
   text: string;
   sources: SearchResult[];
   citations: GroundedCitation[];

@@ -245,18 +245,24 @@ export default class AiAdventRagPlugin extends Plugin {
     signal?: AbortSignal,
     parameters?: ModelParameters,
   ): Promise<RagAnswer> {
+    const calls: import('./types').ModelMetrics[] = [];
+    const started = performance.now();
+    const config = { ...this.localLlmConfig(), signal, options: parameters,
+      onMetrics: (metrics: import('./types').ModelMetrics) => { calls.push(metrics); } };
+    const finish = (answer: RagAnswer): RagAnswer => ({ ...answer,
+      analytics: { calls, elapsedMs: performance.now() - started, queueMs: 0 } });
     if (isFormatCommand(question)) {
       if (!await this.app.vault.adapter.exists(FORMAT_SKILL_PATH)) {
         throw new Error(`Скилл fmt не найден: ${FORMAT_SKILL_PATH}`);
       }
       const skill = await this.app.vault.adapter.read(FORMAT_SKILL_PATH);
-      return formatNote(question, activeNote, skill, this.llmClient, { ...this.localLlmConfig(), signal, options: parameters }, onProgress);
+      return finish(await formatNote(question, activeNote, skill, this.llmClient, config, onProgress));
     }
     const snapshot = this.validatedSnapshot();
-    return this.ragService.answer(
+    return finish(await this.ragService.answer(
       question,
       snapshot,
-      { ...this.localLlmConfig(), signal, options: parameters },
+      config,
       {
         candidateTopK: this.settings.retrievalCandidateTopK,
         finalTopK: this.settings.retrievalFinalTopK,
@@ -268,7 +274,7 @@ export default class AiAdventRagPlugin extends Plugin {
         : undefined,
       onProgress,
       activeNote,
-    );
+    ));
   }
 
   refreshChatViews(): void {

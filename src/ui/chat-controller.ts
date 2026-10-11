@@ -146,11 +146,14 @@ export class ChatController {
     const userEntry = { role: 'user' as const, content: value, usedRag: true, usedRetrievalEnhancements: true };
     dialog.entries.push(userEntry);
     this.drafts.set(id, '');
+    const queuedAt = performance.now();
+    let queueMs = 0;
     const runtime: DialogRuntime = { phase: 'queued', position: 0, text: '', status: 'В очереди…' };
     this.runtimes.set(id, runtime);
     this.changed();
     try {
       const answer = await this.queue.enqueue(async () => {
+        queueMs = performance.now() - queuedAt;
         // Read the originally attached note at task start, including changes made while waiting.
         const context = selection ?? (dialog.contextPath ? await this.api.readNote(dialog.contextPath) : undefined);
         cancellation.signal.throwIfAborted();
@@ -167,7 +170,8 @@ export class ChatController {
         this.emit('progress');
       }, cancellation.signal);
       if (this.disposed || cancellation.signal.aborted) return;
-      dialog.entries.push({ role: 'assistant', content: answer.text, sources: answer.sources,
+      dialog.entries.push({ role: 'assistant', content: answer.text,
+        analytics: answer.analytics ? { ...answer.analytics, queueMs } : undefined, sources: answer.sources,
         citations: answer.citations, groundingStatus: answer.groundingStatus, usedRag: answer.usedRag,
         usedRetrievalEnhancements: answer.usedRetrievalEnhancements, modelCalled: true, retrieval: answer.retrieval });
       runtime.status = 'Ответ получен.';

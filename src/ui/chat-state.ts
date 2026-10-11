@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { sanitizeModelParameters, type ModelParameters } from '../llm/model-parameters';
 import type {
   ChatTurn,
+  DialogAnalytics,
   GroundedCitation,
   GroundingStatus,
   RetrievalDiagnostics,
@@ -15,6 +16,7 @@ export const MAX_DIALOGS = 10;
 export type ChatMode = 'direct' | 'rag-basic' | 'rag-enhanced';
 
 export interface ChatEntry extends ChatTurn {
+  analytics?: DialogAnalytics;
   sources?: SearchResult[];
   citations?: GroundedCitation[];
   groundingStatus?: GroundingStatus;
@@ -101,6 +103,7 @@ function validContextPath(value: unknown): string | null {
 
 function compactEntry(entry: ChatEntry): ChatEntry {
   return {
+    analytics: entry.analytics,
     role: entry.role,
     content: entry.content,
     usedRag: entry.usedRag,
@@ -141,6 +144,7 @@ function sanitizeEntries(value: unknown): ChatEntry[] {
     if (!role || !content) continue;
     entries.push({
       role,
+      analytics: sanitizeAnalytics(record.analytics),
       content,
       usedRag: booleanOrUndefined(record.usedRag),
       usedRetrievalEnhancements: booleanOrUndefined(record.usedRetrievalEnhancements),
@@ -263,4 +267,23 @@ function finiteNumber(value: unknown): number | null {
 
 function booleanOrUndefined(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
+}
+
+function sanitizeAnalytics(value: unknown): DialogAnalytics | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.calls)) return undefined;
+  const positive = (n: unknown): number | undefined => typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : undefined;
+  const elapsedMs = positive(record.elapsedMs), queueMs = positive(record.queueMs);
+  if (elapsedMs === undefined || queueMs === undefined) return undefined;
+  const calls: DialogAnalytics['calls'] = [];
+  for (const raw of record.calls.slice(0, 20) as unknown[]) {
+    if (!raw || typeof raw !== 'object') continue;
+    const item = raw as Record<string, unknown>;
+    if (!item || typeof item !== 'object' || typeof item.model !== 'string') continue;
+    const call: DialogAnalytics['calls'][number] = { model: item.model.slice(0, 200) };
+    for (const key of ['inputTokens', 'outputTokens', 'totalMs', 'loadMs', 'promptMs', 'generationMs', 'firstTokenMs', 'memoryBytes', 'vramBytes'] as const) call[key] = positive(item[key]);
+    calls.push(call);
+  }
+  return { calls, elapsedMs, queueMs };
 }

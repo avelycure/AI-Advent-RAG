@@ -5,7 +5,11 @@ export const FORMAT_SKILL_PATH = '.agents/skills/fmt/SKILL.md';
 export const MAX_FORMAT_CHARACTERS = 12_000;
 
 export function isFormatCommand(question: string): boolean {
-  return /^\/(?:fmt|format)(?:\s|$)/iu.test(question.trim());
+  const text = question.trim();
+  return /^\/(?:fmt|format)(?:\s|$)/iu.test(text) ||
+    /^(?:пожалуйста[,!]?\s+)?(?:отформатируй|форматируй|примени|применить|используй|использовать)(?:\s|$)/iu.test(text) &&
+    /(?:^|[^a-zа-яё0-9_])\/?fmt(?:$|[^a-zа-яё0-9_])/iu.test(text);
+
 }
 
 export async function formatNote(
@@ -26,7 +30,7 @@ export async function formatNote(
   if (!instructions) throw new Error('Скилл fmt не содержит инструкций.');
   onProgress?.({ kind: 'stage', text: activeNote.isSelection ? 'Форматирую выделенный текст и исправляю ошибки…' : 'Форматирую страницу и исправляю ошибки…' });
   const text = await llm.generate([
-    { role: 'system', content: instructions + (activeNote.isSelection ? '\nПользователь выделил фрагмент. Применяй к этому тексту: форматируй только выделение, сохрани все его заголовки и верни только исправленный фрагмент.' : '') },
+    { role: 'system', content: 'Ты редактор текста. Правила скилла fmt уже переданы ниже: применяй их самостоятельно к полю content в предоставленном JSON. Не вызывай инструменты и не пытайся редактировать файл: результатом должен быть сам исправленный текст, который пользователь сможет вставить в заметку. Не сообщай об отсутствии инструментов или доступа к скиллу.\n\n' + instructions + (activeNote.isSelection ? '\nПользователь выделил фрагмент. Применяй к этому тексту: форматируй только выделение, сохрани все его заголовки и верни только исправленный фрагмент.' : '') },
     { role: 'user', content: (activeNote.isSelection ? 'Применяй к этому тексту: отформатируй выделенный фрагмент.' : 'Отформатируй выбранную страницу.') + ' Дополнительные указания пользователя:\n' +
       (question.trim().replace(/^\/(?:fmt|format)\b/iu, '').trim() || 'Нет.') +
       '\n\nВыбранная страница в формате JSON:\n' + JSON.stringify(activeNote) },
