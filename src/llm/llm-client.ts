@@ -7,6 +7,7 @@ export const OPENAI_API_BASE_URL = 'https://api.openai.com/v1';
 export const DEEPSEEK_API_BASE_URL = 'https://api.deepseek.com';
 
 interface OllamaChatResponse {
+  done_reason?: string;
   message?: { content?: string };
 }
 
@@ -48,6 +49,9 @@ export class ConfigurableLlmClient implements LlmClient {
           if (!line.trim()) return;
           const data = JSON.parse(line) as OllamaChatResponse & { error?: string; done?: boolean };
           if (data.error) throw new Error(data.error);
+          if (config.requireComplete && data.done_reason === 'length') {
+            throw new Error('Ответ достиг лимита длины. Форматирование не завершено; разделите страницу на части.');
+          }
           const delta = data.message?.content ?? '';
           answer += delta;
           if (delta) onText(delta);
@@ -57,7 +61,7 @@ export class ConfigurableLlmClient implements LlmClient {
           signal: config.signal,
         url: joinUrl(config.baseUrl, '/api/chat'), method: 'POST',
           body: { model: config.model, messages, stream: true, think: false,
-            options: { num_predict: 4096, num_ctx: 32768, temperature: 0.2 } },
+            options: { num_predict: 4096, num_ctx: 32768, temperature: 0.2, ...config.options } },
         }, (chunk) => {
           pending += chunk;
           let newline = pending.indexOf('\n');
@@ -76,9 +80,12 @@ export class ConfigurableLlmClient implements LlmClient {
         signal: config.signal,
         url: joinUrl(config.baseUrl, '/api/chat'),
         method: 'POST',
-        body: { model: config.model, messages, stream: false, think: false, options: { num_predict: 4096, num_ctx: 32768, temperature: 0.2 } },
+        body: { model: config.model, messages, stream: false, think: false, options: { num_predict: 4096, num_ctx: 32768, temperature: 0.2, ...config.options } },
       });
       const content = response.data.message?.content?.trim();
+      if (config.requireComplete && response.data.done_reason === 'length') {
+        throw new Error('Ответ достиг лимита длины. Форматирование не завершено; разделите страницу на части.');
+      }
       if (!content) throw new Error('The selected Ollama model returned an empty answer.');
       return content;
     }

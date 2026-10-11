@@ -107,6 +107,8 @@ export interface IndexProgress {
 }
 
 export interface LlmConfig {
+  requireComplete?: boolean;
+  options?: { temperature?: number; repeat_penalty?: number; num_predict?: number; num_ctx?: number };
   signal?: AbortSignal;
   provider: LlmProviderId;
   baseUrl: string;

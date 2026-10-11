@@ -13,6 +13,7 @@ import { ModelTaskQueue } from './llm/model-task-queue';
 import { ChatController } from './ui/chat-controller';
 import { ConfigurableLlmClient } from './llm/llm-client';
 import { RagService } from './rag/rag-service';
+import { FORMAT_SKILL_PATH, formatNote, isFormatCommand } from './rag/format-service';
 import { validateIndexSnapshot } from './rag/validate-index-snapshot';
 import { RetrievalService } from './retrieval/retrieval-service';
 import { DEFAULT_SETTINGS, sanitizeSettings } from './settings/defaults';
@@ -239,6 +240,13 @@ export default class AiAdventRagPlugin extends Plugin {
     activeNote?: ActiveNoteContext,
     signal?: AbortSignal,
   ): Promise<RagAnswer> {
+    if (isFormatCommand(question)) {
+      if (!await this.app.vault.adapter.exists(FORMAT_SKILL_PATH)) {
+        throw new Error(`Скилл fmt не найден: ${FORMAT_SKILL_PATH}`);
+      }
+      const skill = await this.app.vault.adapter.read(FORMAT_SKILL_PATH);
+      return formatNote(question, activeNote, skill, this.llmClient, { ...this.localLlmConfig(), signal }, onProgress);
+    }
     const snapshot = this.validatedSnapshot();
     return this.ragService.answer(
       question,

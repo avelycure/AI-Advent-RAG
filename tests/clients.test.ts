@@ -90,6 +90,19 @@ describe('model clients', () => {
     }, () => {})).rejects.toThrow(/прерван/);
   });
 
+  it('rejects token-limited formatting output in streaming and regular responses', async () => {
+    const config = { provider: 'ollama' as const, baseUrl: 'http://127.0.0.1:11434', model: 'qwen3.8:27b', requireComplete: true };
+    const transport = new FakeTransport({ message: { content: 'partial' }, done_reason: 'length' });
+    await expect(new ConfigurableLlmClient(transport).generate([], config)).rejects.toThrow(/лимита/);
+    const streaming: HttpTransport = {
+      request: transport.request.bind(transport),
+      async requestStream(_request, onChunk) {
+        onChunk('{"message":{"content":"partial"},"done":true,"done_reason":"length"}\n');
+      },
+    };
+    await expect(new ConfigurableLlmClient(streaming).generate([], config, () => {})).rejects.toThrow(/лимита/);
+  });
+
   it('builds OpenAI-compatible requests without leaking configuration elsewhere', async () => {
     const transport = new FakeTransport({
       output: [{ content: [{ type: 'output_text', text: 'Answer [S1]' }] }],

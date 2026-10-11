@@ -1,0 +1,38 @@
+import type { ActiveNoteContext, ChatProgress, LlmClient, LlmConfig, RagAnswer } from '../types';
+
+export const FORMAT_SKILL_PATH = '.agents/skills/fmt/SKILL.md';
+// Conservative input bound leaves room for the skill and the complete corrected output.
+export const MAX_FORMAT_CHARACTERS = 12_000;
+
+export function isFormatCommand(question: string): boolean {
+  return /^\/(?:fmt|format)(?:\s|$)/iu.test(question.trim());
+}
+
+export async function formatNote(
+  question: string,
+  activeNote: ActiveNoteContext | undefined,
+  skill: string,
+  llm: LlmClient,
+  config: LlmConfig,
+  onProgress?: (progress: ChatProgress) => void,
+): Promise<RagAnswer> {
+  config.signal?.throwIfAborted();
+  if (!activeNote) throw new Error('Для /fmt выберите диалог с закреплённой страницей.');
+  if (!activeNote.content.trim()) throw new Error('Выбранная страница пустая.');
+  if (activeNote.content.length > MAX_FORMAT_CHARACTERS) {
+    throw new Error('Страница длиннее 12 000 символов. Форматирование отменено, чтобы не обрезать текст. Разделите её на части.');
+  }
+  const instructions = skill.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u, '').trim();
+  if (!instructions) throw new Error('Скилл fmt не содержит инструкций.');
+  onProgress?.({ kind: 'stage', text: 'Форматирую страницу и исправляю ошибки…' });
+  const text = await llm.generate([
+    { role: 'system', content: instructions },
+    { role: 'user', content: 'Отформатируй выбранную страницу. Дополнительные указания пользователя:\n' +
+      (question.trim().replace(/^\/(?:fmt|format)\b/iu, '').trim() || 'Нет.') +
+      '\n\nВыбранная страница в формате JSON:\n' + JSON.stringify(activeNote) },
+  ], { ...config, requireComplete: true, options: { ...config.options, temperature: 0.1, repeat_penalty: 1, num_predict: 8192, num_ctx: 32768 } },
+  onProgress ? (delta) => onProgress({ kind: 'text', text: delta }) : undefined);
+  config.signal?.throwIfAborted();
+  return { text, sources: [], citations: [], groundingStatus: 'not-applicable',
+    usedRag: false, usedRetrievalEnhancements: false, modelCalled: true };
+}

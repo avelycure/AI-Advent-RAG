@@ -156,8 +156,8 @@ export class ChatController {
       }, cancellation.signal);
       if (this.disposed || cancellation.signal.aborted) return;
       dialog.entries.push({ role: 'assistant', content: answer.text, sources: answer.sources,
-        citations: answer.citations, groundingStatus: answer.groundingStatus, usedRag: true,
-        usedRetrievalEnhancements: true, modelCalled: true, retrieval: answer.retrieval });
+        citations: answer.citations, groundingStatus: answer.groundingStatus, usedRag: answer.usedRag,
+        usedRetrievalEnhancements: answer.usedRetrievalEnhancements, modelCalled: true, retrieval: answer.retrieval });
       runtime.status = 'Ответ получен.';
     } catch (error) {
       if (this.disposed || cancellation.signal.aborted) return;

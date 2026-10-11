@@ -1,0 +1,50 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it, vi } from 'vitest';
+import { formatNote, isFormatCommand, MAX_FORMAT_CHARACTERS } from '../src/rag/format-service';
+import type { LlmClient, LlmConfig } from '../src/types';
+
+const skill = readFileSync('vault-skills/fmt/SKILL.md', 'utf8');
+const config: LlmConfig = { provider: 'ollama', baseUrl: 'http://127.0.0.1:11434', model: 'qwen3.8:27b' };
+const note = { path: 'Рецепт.md', title: 'Рецепт', content: 'Я добовил 250 г муки.', mtime: 1 };
+function model() {
+  const generate = vi.fn(async () => 'Я добавил 250 г муки.');
+  const llm: LlmClient = { generate, testConnection: async () => {} };
+  return { generate, llm };
+}
+
+describe('vault formatting skill', () => {
+  it('recognizes only slash commands, including the format alias and extra instructions', () => {
+    expect(isFormatCommand('/fmt')).toBe(true);
+    expect(isFormatCommand(' /format сохрани заголовки')).toBe(true);
+    expect(isFormatCommand('/fmtx')).toBe(false);
+    expect(isFormatCommand('Расскажи про fmt')).toBe(false);
+  });
+  it('sends the complete selected note and skill without history or retrieval and applies formatting options', async () => {
+    const { llm, generate } = model();
+    const result = await formatNote('/fmt сохрани заголовки', note, skill, llm, config);
+    expect(generate).toHaveBeenCalledOnce();
+    const [messages, options] = generate.mock.calls[0]! as unknown as [Array<{ role: string; content: string }>, LlmConfig];
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.content).not.toContain('description:');
+    expect(messages[1]?.content).toContain('сохрани заголовки');
+    expect(JSON.parse(messages[1]!.content.split('Выбранная страница в формате JSON:\n')[1]!)).toEqual(note);
+    expect(options.options).toEqual({ temperature: 0.1, repeat_penalty: 1, num_predict: 8192, num_ctx: 32768 });
+    expect(result.usedRag).toBe(false);
+    expect(result.sources).toEqual([]);
+    expect(result.text).toBe('Я добавил 250 г муки.');
+  });
+  it('refuses missing, empty and oversized notes before calling the model', async () => {
+    const { llm, generate } = model();
+    await expect(formatNote('/fmt', undefined, skill, llm, config)).rejects.toThrow(/закреплённой/);
+    await expect(formatNote('/fmt', { ...note, content: ' ' }, skill, llm, config)).rejects.toThrow(/пустая/);
+    await expect(formatNote('/fmt', { ...note, content: 'x'.repeat(MAX_FORMAT_CHARACTERS + 1) }, skill, llm, config)).rejects.toThrow(/не обрезать/);
+    expect(generate).not.toHaveBeenCalled();
+  });
+  it('respects cancellation before starting a model request', async () => {
+    const { llm, generate } = model();
+    const cancellation = new AbortController();
+    cancellation.abort();
+    await expect(formatNote('/fmt', note, skill, llm, { ...config, signal: cancellation.signal })).rejects.toThrow();
+    expect(generate).not.toHaveBeenCalled();
+  });
+});

@@ -26,7 +26,17 @@ Copy the built `main.js`, `manifest.json`, and `styles.css` into `<vault>/.obsid
 3. Select **Проверить подключение** to test both model availability and an actual response. A cold model start can take a few minutes.
 4. Choose folders and rebuild the local index if necessary. Embeddings use `qwen3-embedding:0.6b` independently of the chat model.
 5. Open **Чат с локальной Qwen** using the ribbon or command palette and send a question.
-6. RAG is the only chat mode. Query rewriting and filtering always run before streaming the answer with links to retrieved notes. The old direct and basic RAG switches have been removed.
+6. Regular questions use RAG: query rewriting and filtering run before streaming the answer with links to retrieved notes. The old direct and basic RAG switches have been removed. `/fmt` uses the selected page directly, as described below.
+
+## Formatting with /fmt
+
+Install `vault-skills/fmt/SKILL.md` at `<vault>/.agents/skills/fmt/SKILL.md`. Create a dialog with the desired page selected in its context chip and send `/fmt` or `/format`. Optional instructions follow the command, for example `/fmt сохрани все заголовки`.
+
+The skill formats Markdown and corrects spelling, punctuation, grammar and syntax while preserving meaning, facts and protected Obsidian objects. The full page is read when the queued task starts. Formatting makes one local model call, without RAG, query rewriting or chat history, and does not require a search index. Results appear in the dialog; the source page is not overwritten. The skill is reloaded from the vault on every request.
+
+Formatting uses temperature **0.1**, repeat penalty **1.0**, a **32,768-token** context and up to **8,192 output tokens**, with thinking disabled. Pages over **12,000 characters** are rejected rather than silently truncated. A response that reaches the output token limit is treated as incomplete.
+
+Run `node scripts/run-fmt-smoke.mjs` to test the installed local Qwen on synthetic notes. The script prints the temporary directory containing inputs, outputs and invariant checks; no real notes are edited.
 
 Existing cloud settings migrate automatically to local Ollama. The plugin does not fall back to a cloud model if Ollama is unavailable. The connection check sends only a test question. Chat history remains in `rag-chat-state.json`; a two-finger click (secondary click) on a dialog icon deletes that dialog. The generation request disables thinking and sets a 32,768-token context window with up to 4,096 output tokens.
 
