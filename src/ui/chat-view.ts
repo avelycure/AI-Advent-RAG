@@ -382,6 +382,7 @@ export class ChatView extends ItemView {
     container: HTMLElement,
     diagnostics: RetrievalDiagnostics,
   ): void {
+    if (!(!diagnostics.queryRewritten && diagnostics.rewriteFailed) && !diagnostics.groundingRepairAttempted) return;
     const details = container.createDiv({ cls: 'ai-advent-rag-retrieval-details' });
     if (!diagnostics.queryRewritten && diagnostics.rewriteFailed) {
       details.createDiv({ text: 'Переформулирование не удалось — использован исходный вопрос.' });
