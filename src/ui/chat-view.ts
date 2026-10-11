@@ -158,10 +158,15 @@ export class ChatView extends ItemView {
   private renderEntries(container: HTMLElement): void {
     container.empty();
     if ((this.pluginApi.chatController.activeDialog?.entries.length ?? 0) === 0) {
-      container.createDiv({
+      const card = container.createDiv({
         cls: 'ai-advent-rag-empty',
-        text: 'Сообщений пока нет. Задайте вопрос — Qwen найдёт подходящие фрагменты заметок.',
+        attr: { role: 'listitem' },
       });
+      const icon = card.createDiv({ cls: 'ai-advent-rag-empty-icon', attr: { 'aria-hidden': 'true' } });
+      setIcon(icon, 'message-square');
+      const content = card.createDiv({ cls: 'ai-advent-rag-empty-content' });
+      content.createEl('h4', { text: 'Сообщений пока нет' });
+      content.createEl('p', { text: 'Задайте вопрос — Qwen найдёт подходящие фрагменты заметок.' });
       return;
     }
 
