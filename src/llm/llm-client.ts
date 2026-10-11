@@ -32,6 +32,7 @@ export class ConfigurableLlmClient implements LlmClient {
     validateConfig(config);
     if (config.provider === 'ollama') {
       const modelInfo = await this.transport.request<{ remote_model?: string; remote_host?: string }>({
+        signal: config.signal,
         url: joinUrl(config.baseUrl, '/api/show'),
         method: 'POST',
         body: { model: config.model },
@@ -53,7 +54,8 @@ export class ConfigurableLlmClient implements LlmClient {
           done ||= data.done === true;
         };
         await this.transport.requestStream({
-          url: joinUrl(config.baseUrl, '/api/chat'), method: 'POST',
+          signal: config.signal,
+        url: joinUrl(config.baseUrl, '/api/chat'), method: 'POST',
           body: { model: config.model, messages, stream: true, think: false,
             options: { num_predict: 4096, num_ctx: 32768, temperature: 0.2 } },
         }, (chunk) => {
@@ -71,6 +73,7 @@ export class ConfigurableLlmClient implements LlmClient {
         return answer.trim();
       }
       const response = await this.transport.request<OllamaChatResponse>({
+        signal: config.signal,
         url: joinUrl(config.baseUrl, '/api/chat'),
         method: 'POST',
         body: { model: config.model, messages, stream: false, think: false, options: { num_predict: 4096, num_ctx: 32768, temperature: 0.2 } },

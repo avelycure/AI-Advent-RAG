@@ -19,12 +19,14 @@ export class RagService {
     onProgress?: (progress: ChatProgress) => void,
     activeNote?: ActiveNoteContext,
   ): Promise<RagAnswer> {
+    llmConfig.signal?.throwIfAborted();
     const normalizedQuestion = question.trim();
     if (!normalizedQuestion) throw new Error('Введите вопрос.');
     if (normalizedQuestion.length > MAX_QUESTION_CHARACTERS) throw new Error('Вопрос не должен превышать 4 000 символов.');
     if (!index) throw new Error('Сначала перестройте локальный индекс в настройках плагина.');
     onProgress?.({ kind: 'stage', text: 'Переформулирую вопрос для поиска…' });
     const rewrite = await rewriteSearchQuery(normalizedQuestion, history, this.llm, llmConfig, undefined, activeNote);
+    llmConfig.signal?.throwIfAborted();
     onProgress?.({ kind: 'stage', text: 'Ищу фрагменты заметок…' });
     const retrievalOptions = {
       candidateTopK: options.candidateTopK,
@@ -33,8 +35,9 @@ export class RagService {
       expandRelevantSources: true,
     };
     const retrieval = index.chunks.length > 0
-      ? await this.retrieval.search(rewrite.query, index, retrievalOptions, backendSearch)
+      ? await this.retrieval.search(rewrite.query, index, retrievalOptions, backendSearch, llmConfig.signal)
       : { results: [], candidateCount: 0 };
+    llmConfig.signal?.throwIfAborted();
     const pinnedText = activeNote?.content.slice(0, MAX_ACTIVE_NOTE_CHARACTERS);
     const pinned: RagAnswer['sources'] = activeNote && pinnedText ? [{
       sourceId: '', score: 1, isActiveNote: true,

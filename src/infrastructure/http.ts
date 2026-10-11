@@ -1,4 +1,5 @@
 export interface HttpRequest {
+  signal?: AbortSignal;
   url: string;
   method?: 'GET' | 'POST';
   headers?: Record<string, string>;

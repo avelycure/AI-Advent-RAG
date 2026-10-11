@@ -87,7 +87,7 @@ export default class AiAdventRagPlugin extends Plugin {
         return active?.extension === 'md' ? active.path : this.lastActiveNotePath;
       },
       readNote: (path) => this.readNoteContext(path),
-      answer: (question, history, context, onProgress) => this.answerQuestion(question, history, onProgress, context),
+      answer: (question, history, context, onProgress, signal) => this.answerQuestion(question, history, onProgress, context, signal),
       onError: (message) => { new Notice(message); },
     });
     try { await this.chatController.initialize(false); }
@@ -237,12 +237,13 @@ export default class AiAdventRagPlugin extends Plugin {
     history: readonly ChatTurn[],
     onProgress?: (progress: ChatProgress) => void,
     activeNote?: ActiveNoteContext,
+    signal?: AbortSignal,
   ): Promise<RagAnswer> {
     const snapshot = this.validatedSnapshot();
     return this.ragService.answer(
       question,
       snapshot,
-      this.localLlmConfig(),
+      { ...this.localLlmConfig(), signal },
       {
         candidateTopK: this.settings.retrievalCandidateTopK,
         finalTopK: this.settings.retrievalFinalTopK,

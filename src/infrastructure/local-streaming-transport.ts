@@ -22,6 +22,7 @@ export class LocalStreamingTransport implements HttpTransport {
   }
 
   async requestStream(request: HttpRequest, onChunk: (chunk: string) => void): Promise<void> {
+    request.signal?.throwIfAborted();
     if (this.disposed) throw new Error('Запрос отменён: плагин закрыт.');
     const url = new URL(request.url);
     if (url.origin !== 'http://127.0.0.1:11434') throw new Error('Запросы разрешены только к локальной Ollama.');
@@ -57,9 +58,15 @@ export class LocalStreamingTransport implements HttpTransport {
         response.on('aborted', () => reject(new Error('Поток ответа модели прерван.')));
       });
       this.requests.add(req);
-      req.on('close', () => { this.requests.delete(req); });
+      const abort = (): void => { req.destroy(new Error('Запрос отменён.')); };
+      request.signal?.addEventListener('abort', abort, { once: true });
+      req.on('close', () => {
+        this.requests.delete(req);
+        request.signal?.removeEventListener('abort', abort);
+      });
       req.setTimeout(request.timeoutMs ?? 300_000, () => req.destroy(new Error('Модель слишком долго не отвечает.')));
       req.on('error', reject);
+      if (request.signal?.aborted) { abort(); return; }
       req.end(body);
     });
   }

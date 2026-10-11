@@ -59,6 +59,7 @@ export class RetrievalService {
     index: VectorIndexSnapshot,
     options: RetrievalOptions,
     backendSearch?: (queryVector: number[], topK: number) => Promise<VectorSearchHit[] | null>,
+    signal?: AbortSignal,
   ): Promise<RetrievalResponse> {
     const normalizedQuery = query.trim();
     if (!normalizedQuery) throw new Error('Enter a search query.');
@@ -69,7 +70,8 @@ export class RetrievalService {
       throw new Error('The local Qwen embedding model changed. Rebuild the index before searching.');
     }
 
-    const [queryVector] = await this.embeddings.embed([normalizedQuery]);
+    signal?.throwIfAborted();
+    const [queryVector] = await this.embeddings.embed([normalizedQuery], signal);
     if (!queryVector) throw new Error('Failed to create an embedding for the search query.');
     const normalizedVector = normalizeVector(queryVector);
     if (!normalizedVector) throw new Error('Не удалось нормализовать поисковый embedding-вектор.');

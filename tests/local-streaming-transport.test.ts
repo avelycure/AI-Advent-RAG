@@ -16,6 +16,16 @@ function fakeRequest() {
 beforeEach(() => { mocks.request.mockReset(); });
 
 describe('cancellable local model transport', () => {
+  it('destroys the HTTP request when its signal is cancelled', async () => {
+    const request = fakeRequest();
+    mocks.request.mockReturnValue(request);
+    const cancellation = new AbortController();
+    const transport = new LocalStreamingTransport();
+    const running = transport.requestStream({ url: 'http://127.0.0.1:11434/api/chat', signal: cancellation.signal }, () => {});
+    cancellation.abort();
+    await expect(running).rejects.toThrow(/отменён/);
+    expect(request.listenerCount('error')).toBeGreaterThan(0);
+  });
   it('uses GET without a body and parses model metadata', async () => {
     const request = fakeRequest();
     mocks.request.mockImplementation((_url: URL, options: { method: string; headers: unknown }, callback: (response: EventEmitter) => void) => {

@@ -16,9 +16,10 @@ export class OllamaEmbeddingClient implements EmbeddingClient {
     private readonly baseUrl = OLLAMA_BASE_URL,
   ) {}
 
-  async embed(input: string[]): Promise<number[][]> {
+  async embed(input: string[], signal?: AbortSignal): Promise<number[][]> {
     if (input.length === 0) return [];
     const response = await this.transport.request<EmbedResponse>({
+      signal,
       url: joinUrl(this.baseUrl, '/api/embed'),
       method: 'POST',
       body: { model: EMBEDDING_MODEL, input, truncate: false },

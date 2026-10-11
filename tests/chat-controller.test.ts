@@ -45,6 +45,42 @@ describe('independent queued dialogs', () => {
     expect(first.entries.map((entry) => entry.content)).toEqual(['Question', 'Question']);
     expect(saved().dialogs.map((dialog) => dialog.id)).toEqual([first.id, second.id, third.id]);
   });
+  it('cancels a running request on deletion and continues with the next dialog', async () => {
+    let started = false;
+    const { controller, saved } = setup({ answer: async (question, _history, _context, _progress, signal) => {
+      if (question === 'first') await new Promise<void>((_resolve, reject) => {
+        started = true;
+        signal!.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
+      });
+      return answer(question);
+    } });
+    await controller.initialize();
+    const first = controller.activeDialog!;
+    const second = controller.createDialog();
+    const running = controller.send(first.id, 'first');
+    const waiting = controller.send(second.id, 'second');
+    await vi.waitFor(() => expect(started).toBe(true));
+    controller.deleteDialog(first.id);
+    await Promise.all([running, waiting]);
+    expect(saved().dialogs.map((dialog) => dialog.id)).toEqual([second.id]);
+    expect(second.entries.at(-1)?.content).toBe('second');
+    expect(controller.drafts.has(first.id)).toBe(false);
+  });
+  it('removes a queued request without sending it to the model', async () => {
+    const { controller, queue, api } = setup();
+    await controller.initialize();
+    const gate = deferred();
+    const blocking = queue.enqueue(() => gate.promise);
+    const dialog = controller.activeDialog!;
+    const request = controller.send(dialog.id, 'cancel me');
+    controller.deleteDialog(dialog.id);
+    await request;
+    expect(queue.pendingCount).toBe(0);
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- inspect a mock
+    expect(api.answer).not.toHaveBeenCalled();
+    gate.resolve();
+    await blocking;
+  });
   it('caps dialogs at ten and captures the active note separately for each new dialog', async () => {
     let path: string | null = 'First.md';
     const { controller } = setup({ activeNotePath: () => path });
@@ -89,7 +125,7 @@ describe('independent queued dialogs', () => {
     expect(saved().dialogs.every((dialog) => dialog.entries.length === 2)).toBe(true);
     expect(controller.state.activeDialogId).toBe(ids[5]);
   });
-  it('removes pinned context before a queued task starts and prevents deleting a busy dialog', async () => {
+  it('removes pinned context before a queued task starts', async () => {
     const { controller, queue, api, readNote } = setup();
     await controller.initialize();
     const gate = deferred();
@@ -97,14 +133,13 @@ describe('independent queued dialogs', () => {
     const dialog = controller.activeDialog!;
     const request = controller.send(dialog.id, 'Question');
     expect(controller.runtime(dialog.id).phase).toBe('queued');
-    expect(() => controller.deleteDialog(dialog.id)).toThrow(/Дождитесь/);
     controller.removeContext(dialog.id);
     gate.resolve();
     await blocking;
     await request;
     expect(readNote).not.toHaveBeenCalled();
     // eslint-disable-next-line @typescript-eslint/unbound-method -- inspect a mock without invoking the method
-    expect(api.answer).toHaveBeenCalledWith('Question', [], undefined, expect.any(Function));
+    expect(api.answer).toHaveBeenCalledWith('Question', [], undefined, expect.any(Function), expect.any(AbortSignal));
   });
   it('isolates histories and restores the failed message for retry while the queue continues', async () => {
     const { controller } = setup({ answer: async (question, history) => {

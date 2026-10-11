@@ -19,14 +19,25 @@ export class ModelTaskQueue {
   get pendingCount(): number { return this.waiting.length; }
   get isRunning(): boolean { return this.running; }
 
-  enqueue<T>(run: () => Promise<T>, onPosition?: (position: number) => void): Promise<T> {
+  enqueue<T>(run: () => Promise<T>, onPosition?: (position: number) => void, signal?: AbortSignal): Promise<T> {
+    if (signal?.aborted) return Promise.reject(new Error('Запрос отменён.'));
     if (this.disposed) return Promise.reject(new Error('Очередь остановлена. Откройте плагин заново.'));
     return new Promise<T>((resolve, reject) => {
-      this.waiting.push({
-        run: async () => { try { resolve(await run()); } catch (error) { reject(error instanceof Error ? error : new Error(String(error))); } },
-        fail: reject,
+      const cleanup = (): void => { signal?.removeEventListener('abort', abort); };
+      const job: QueueJob = {
+        run: async () => { cleanup(); try { signal?.throwIfAborted(); resolve(await run()); } catch (error) { reject(error instanceof Error ? error : new Error(String(error))); } },
+        fail: (error) => { cleanup(); reject(error); },
         onPosition,
-      });
+      };
+      const abort = (): void => {
+        const index = this.waiting.indexOf(job);
+        if (index < 0) return;
+        this.waiting.splice(index, 1);
+        job.fail(new Error('Запрос отменён.'));
+        this.notifyPositions();
+      };
+      this.waiting.push(job);
+      signal?.addEventListener('abort', abort, { once: true });
       this.notifyPositions();
       this.drain();
     });

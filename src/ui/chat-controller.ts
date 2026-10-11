@@ -10,7 +10,7 @@ export interface ChatControllerApi {
   activeNotePath(): string | null;
   readNote(path: string): Promise<ActiveNoteContext>;
   answer(question: string, history: readonly ChatTurn[], context: ActiveNoteContext | undefined,
-    onProgress: (progress: ChatProgress) => void): Promise<RagAnswer>;
+    onProgress: (progress: ChatProgress) => void, signal?: AbortSignal): Promise<RagAnswer>;
   onError(message: string): void;
 }
 export interface DialogRuntime {
@@ -30,6 +30,7 @@ export class ChatController {
   private listeners = new Set<(kind: 'change' | 'progress') => void>();
   private initialization?: Promise<void>;
   private disposed = false;
+  private cancellations = new Map<string, AbortController>();
 
   dispose(): void { this.disposed = true; this.listeners.clear(); }
 
@@ -100,8 +101,9 @@ export class ChatController {
     this.changed();
   }
   deleteDialog(id: string): void {
-    this.requireIdle(id);
     this.requireDialog(id);
+    this.cancellations.get(id)?.abort();
+    this.cancellations.delete(id);
     this.state.dialogs = this.state.dialogs.filter((dialog) => dialog.id !== id);
     this.runtimes.delete(id);
     this.drafts.delete(id);
@@ -126,6 +128,8 @@ export class ChatController {
     if (!value || value.length > 4000) throw new Error('Введите сообщение длиной от 1 до 4 000 символов.');
     this.requireIdle(id);
     const dialog = this.requireDialog(id);
+    const cancellation = new AbortController();
+    this.cancellations.set(id, cancellation);
     const history = dialog.entries.map(({ role, content }) => ({ role, content }));
     const userEntry = { role: 'user' as const, content: value, usedRag: true, usedRetrievalEnhancements: true };
     dialog.entries.push(userEntry);
@@ -137,24 +141,26 @@ export class ChatController {
       const answer = await this.queue.enqueue(async () => {
         // Read the originally attached note at task start, including changes made while waiting.
         const context = dialog.contextPath ? await this.api.readNote(dialog.contextPath) : undefined;
+        cancellation.signal.throwIfAborted();
         return this.api.answer(value, history, context, (progress) => {
+          if (cancellation.signal.aborted) return;
           if (progress.kind === 'stage') runtime.status = progress.text;
           else { runtime.text += progress.text; runtime.status = 'Qwen отвечает…'; }
           this.emit('progress');
-        });
+        }, cancellation.signal);
       }, (position) => {
         runtime.position = position;
         runtime.phase = position === 0 ? 'running' : 'queued';
         runtime.status = position === 0 ? 'Подключаюсь к локальной Qwen…' : `В очереди: ${position}`;
         this.emit('progress');
-      });
-      if (this.disposed) return;
+      }, cancellation.signal);
+      if (this.disposed || cancellation.signal.aborted) return;
       dialog.entries.push({ role: 'assistant', content: answer.text, sources: answer.sources,
         citations: answer.citations, groundingStatus: answer.groundingStatus, usedRag: true,
         usedRetrievalEnhancements: true, modelCalled: true, retrieval: answer.retrieval });
       runtime.status = 'Ответ получен.';
     } catch (error) {
-      if (this.disposed) return;
+      if (this.disposed || cancellation.signal.aborted) return;
       runtime.error = error instanceof Error ? error.message : String(error);
       runtime.status = 'Не удалось получить ответ.';
       const index = dialog.entries.indexOf(userEntry);
@@ -163,7 +169,8 @@ export class ChatController {
     } finally {
       runtime.phase = 'idle';
       runtime.text = '';
-      if (!this.disposed) {
+      this.cancellations.delete(id);
+      if (!this.disposed && !cancellation.signal.aborted) {
         dialog.entries = dialog.entries.slice(-MAX_PERSISTED_CHAT_ENTRIES);
         this.changed();
       }

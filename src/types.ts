@@ -107,6 +107,7 @@ export interface IndexProgress {
 }
 
 export interface LlmConfig {
+  signal?: AbortSignal;
   provider: LlmProviderId;
   baseUrl: string;
   model: string;
@@ -124,7 +125,7 @@ export interface LlmClient {
 }
 
 export interface EmbeddingClient {
-  embed(input: string[]): Promise<number[][]>;
+  embed(input: string[], signal?: AbortSignal): Promise<number[][]>;
   testConnection(): Promise<void>;
   getFingerprint(): Promise<string>;
 }
