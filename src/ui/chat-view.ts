@@ -14,7 +14,6 @@ export class ChatView extends ItemView {
   private unsubscribe?: () => void;
   private queryEl?: HTMLTextAreaElement;
   private activityEl?: HTMLElement;
-  private pendingEl?: HTMLElement;
   private liveBody?: HTMLElement;
   private messagesEl?: HTMLElement;
   private contextRemoveButton?: HTMLButtonElement;
@@ -73,7 +72,6 @@ export class ChatView extends ItemView {
     container.addClass('ai-advent-rag-view');
     this.tabs.clear();
     this.activityEl = undefined;
-    this.pendingEl = undefined;
     this.liveBody = undefined;
     this.contextRemoveButton = undefined;
     if (!dialog) return;
@@ -84,8 +82,6 @@ export class ChatView extends ItemView {
     this.renderEntries(messages);
     if (busy) {
       const pending = messages.createDiv({ cls: 'ai-advent-rag-message is-assistant is-pending', attr: { role: 'listitem' } });
-      this.pendingEl = pending;
-      pending.hidden = runtime.phase === 'queued';
       this.activityEl = pending.createDiv({ cls: 'ai-advent-rag-message-label', text: runtime.status, attr: { role: 'status', 'aria-live': 'polite' } });
       this.liveBody = pending.createDiv({ cls: 'ai-advent-rag-message-body', text: runtime.text });
     }
@@ -190,7 +186,6 @@ export class ChatView extends ItemView {
     const runtime = controller.runtime(dialog.id);
     this.contextRemoveButton && (this.contextRemoveButton.disabled = runtime.phase === 'running');
     this.activityEl?.setText(runtime.status);
-    if (this.pendingEl) this.pendingEl.hidden = runtime.phase === 'queued';
     this.liveBody?.setText(runtime.text);
     if (this.messagesEl && runtime.phase === 'running') this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   }

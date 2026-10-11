@@ -77,6 +77,7 @@ describe('independent queued dialogs', () => {
     await vi.waitFor(() => expect(controller.runtime(ids[0]!).text).toBe('question 0'));
     expect(controller.runtime(ids[9]!).phase).toBe('queued');
     expect(controller.runtime(ids[9]!).position).toBe(9);
+    expect(controller.runtime(ids[9]!).status).toBe('В очереди: 9');
     controller.selectDialog(ids[5]!);
     expect(controller.runtime(ids[5]!).text).toBe('');
     gate.resolve();
