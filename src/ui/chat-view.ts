@@ -342,7 +342,7 @@ export class ChatView extends ItemView {
         cls: 'ai-advent-rag-score',
         text: source.isActiveNote
           ? ` · закреплённая заметка${source.contextTruncated ? ' · первые 12 000 символов' : ''}`
-          : ` · similarity ${source.score.toFixed(3)} · строки ${source.chunk.metadata.line_start}–${source.chunk.metadata.line_end}${source.contextTruncated ? ' · текст обрезан до лимита' : ''}`,
+          : ` · sim ${source.score.toFixed(3)} · строки ${source.chunk.metadata.line_start}–${source.chunk.metadata.line_end}${source.contextTruncated ? ' · текст обрезан до лимита' : ''}`,
       });
     }
   }
