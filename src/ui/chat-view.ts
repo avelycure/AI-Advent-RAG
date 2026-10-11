@@ -265,15 +265,7 @@ export class ChatView extends ItemView {
     diagnostics: RetrievalDiagnostics,
   ): void {
     const details = container.createDiv({ cls: 'ai-advent-rag-retrieval-details' });
-    const threshold = diagnostics.similarityThreshold === null
-      ? 'без порога'
-      : `порог ≥ ${diagnostics.similarityThreshold.toFixed(2)}`;
-    details.createDiv({
-      text: `Поиск: ${diagnostics.candidateCount} кандидатов → ${diagnostics.resultCount} фрагментов; ${threshold}.`,
-    });
-    if (diagnostics.queryRewritten) {
-      details.createDiv({ text: `Поисковый запрос: ${diagnostics.searchQuery}` });
-    } else if (diagnostics.rewriteFailed) {
+    if (!diagnostics.queryRewritten && diagnostics.rewriteFailed) {
       details.createDiv({ text: 'Переформулирование не удалось — использован исходный вопрос.' });
     }
     if (diagnostics.groundingRepairAttempted) {
