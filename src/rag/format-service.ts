@@ -24,10 +24,10 @@ export async function formatNote(
   }
   const instructions = skill.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u, '').trim();
   if (!instructions) throw new Error('Скилл fmt не содержит инструкций.');
-  onProgress?.({ kind: 'stage', text: 'Форматирую страницу и исправляю ошибки…' });
+  onProgress?.({ kind: 'stage', text: activeNote.isSelection ? 'Форматирую выделенный текст и исправляю ошибки…' : 'Форматирую страницу и исправляю ошибки…' });
   const text = await llm.generate([
-    { role: 'system', content: instructions },
-    { role: 'user', content: 'Отформатируй выбранную страницу. Дополнительные указания пользователя:\n' +
+    { role: 'system', content: instructions + (activeNote.isSelection ? '\nПользователь выделил фрагмент. Применяй к этому тексту: форматируй только выделение, сохрани все его заголовки и верни только исправленный фрагмент.' : '') },
+    { role: 'user', content: (activeNote.isSelection ? 'Применяй к этому тексту: отформатируй выделенный фрагмент.' : 'Отформатируй выбранную страницу.') + ' Дополнительные указания пользователя:\n' +
       (question.trim().replace(/^\/(?:fmt|format)\b/iu, '').trim() || 'Нет.') +
       '\n\nВыбранная страница в формате JSON:\n' + JSON.stringify(activeNote) },
   ], { ...config, requireComplete: true, options: { temperature: 0.1, repeat_penalty: 1, num_predict: 8192, num_ctx: 32768, ...config.options } },

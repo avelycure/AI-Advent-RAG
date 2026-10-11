@@ -40,13 +40,13 @@ export class RagService {
     llmConfig.signal?.throwIfAborted();
     const pinnedText = activeNote?.content.slice(0, MAX_ACTIVE_NOTE_CHARACTERS);
     const pinned: RagAnswer['sources'] = activeNote && pinnedText ? [{
-      sourceId: '', score: 1, isActiveNote: true,
+      sourceId: '', score: 1, isActiveNote: true, isSelection: activeNote.isSelection,
       contextTruncated: pinnedText.length < activeNote.content.length,
       chunk: {
         ordinal: 0, text: pinnedText, contentHash: '', vector: [],
         metadata: { source: activeNote.path, title: activeNote.title, section: null,
-          chunk_id: `active-note:${activeNote.path}`, line_start: 1,
-          line_end: pinnedText.split('\n').length, file_mtime: activeNote.mtime },
+          chunk_id: `active-note:${activeNote.path}`, line_start: activeNote.lineStart ?? 1,
+          line_end: (activeNote.lineStart ?? 1) + pinnedText.split('\n').length - 1, file_mtime: activeNote.mtime },
       },
     }] : [];
     const selected = [...pinned, ...retrieval.results.filter((source) => !pinned.length || source.chunk.metadata.source !== activeNote?.path)]

@@ -92,6 +92,7 @@ export interface ChunkingComparison {
 }
 
 export interface SearchResult {
+  isSelection?: boolean;
   isActiveNote?: boolean;
   chunk: IndexedChunk;
   score: number;
@@ -145,6 +146,8 @@ export interface VectorSearchHit {
 }
 
 export interface ActiveNoteContext {
+  isSelection?: boolean;
+  lineStart?: number;
   path: string;
   title: string;
   content: string;

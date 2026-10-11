@@ -56,6 +56,8 @@ Hold a dialog icon for about half a second to open a panel above it with sliders
 
 The clipboard icon in the bottom-right corner of the composer inserts the active dialog’s latest completed model answer into the current note at the editor cursor (replacing the selection, if present). It is disabled while a request is pending or there is no answer. If no editable note is open, the plugin shows a notice. Insertion uses the normal editor operation and can be undone.
 
+If the currently open editable note has selected text, sending a message captures that exact fragment as the primary context with the instruction to apply the action only to it. The snapshot is taken before queuing, even if the pinned page is different or absent. Without a selection, the pinned page behavior remains unchanged. `/fmt` formats only the selected fragment and preserves its headings. Selections over 12,000 characters are rejected instead of truncated. Selection sources keep their original note line numbers.
+
 ## Day 27 verification
 
 ```bash

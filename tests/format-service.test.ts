@@ -40,6 +40,15 @@ describe('vault formatting skill', () => {
     const [, options] = generate.mock.calls[0]! as unknown as [unknown, LlmConfig];
     expect(options.options).toEqual(custom);
   });
+  it('targets only the selected fragment and preserves its headings', async () => {
+    const { llm, generate } = model();
+    const selected = { ...note, isSelection: true, lineStart: 4 };
+    await formatNote('/fmt', selected, skill, llm, config);
+    const [messages] = generate.mock.calls[0]! as unknown as [Array<{ content: string }>];
+    expect(messages[0]?.content).toContain('форматируй только выделение, сохрани все его заголовки');
+    expect(messages[1]?.content).toContain('Применяй к этому тексту');
+    expect(JSON.parse(messages[1]!.content.split('Выбранная страница в формате JSON:\n')[1]!)).toEqual(selected);
+  });
   it('refuses missing, empty and oversized notes before calling the model', async () => {
     const { llm, generate } = model();
     await expect(formatNote('/fmt', undefined, skill, llm, config)).rejects.toThrow(/закреплённой/);

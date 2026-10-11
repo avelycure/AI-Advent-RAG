@@ -1,4 +1,4 @@
-import type { ActiveNoteContext, ChatProgress, ChatTurn, RagAnswer } from '../types';
+import { MAX_ACTIVE_NOTE_CHARACTERS, type ActiveNoteContext, type ChatProgress, type ChatTurn, type RagAnswer } from '../types';
 import { ModelTaskQueue } from '../llm/model-task-queue';
 import { sanitizeModelParameters, type ModelParameters } from '../llm/model-parameters';
 import { emptyChatState, MAX_PERSISTED_CHAT_ENTRIES, MAX_DIALOGS, newChatDialog, type ChatDialog, type ChatState } from './chat-state';
@@ -8,6 +8,7 @@ export interface ChatStore {
   save(state: ChatState): Promise<void>;
 }
 export interface ChatControllerApi {
+  activeSelection?(): ActiveNoteContext | undefined;
   activeNotePath(): string | null;
   readNote(path: string): Promise<ActiveNoteContext>;
   answer(question: string, history: readonly ChatTurn[], context: ActiveNoteContext | undefined,
@@ -134,6 +135,11 @@ export class ChatController {
     this.requireIdle(id);
     const dialog = this.requireDialog(id);
     const cancellation = new AbortController();
+    const selected = this.api.activeSelection?.();
+    const selection = selected ? { ...selected } : undefined;
+    if (selection && selection.content.length > MAX_ACTIVE_NOTE_CHARACTERS) {
+      throw new Error('Выделенный текст длиннее 12 000 символов. Выделите меньший фрагмент, чтобы не обрезать его.');
+    }
     const parameters = sanitizeModelParameters(dialog.modelParameters);
     this.cancellations.set(id, cancellation);
     const history = dialog.entries.map(({ role, content }) => ({ role, content }));
@@ -146,7 +152,7 @@ export class ChatController {
     try {
       const answer = await this.queue.enqueue(async () => {
         // Read the originally attached note at task start, including changes made while waiting.
-        const context = dialog.contextPath ? await this.api.readNote(dialog.contextPath) : undefined;
+        const context = selection ?? (dialog.contextPath ? await this.api.readNote(dialog.contextPath) : undefined);
         cancellation.signal.throwIfAborted();
         return this.api.answer(value, history, context, (progress) => {
           if (cancellation.signal.aborted) return;

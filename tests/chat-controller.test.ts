@@ -104,6 +104,31 @@ describe('independent queued dialogs', () => {
     await controller.send(first.id, 'after');
     expect(received).toEqual([0.35, 0.7]);
   });
+  it('captures selection at submission and prioritizes it over the pinned page while queued', async () => {
+    const selected = { path: 'Other.md', title: 'Other', content: 'Original selected text', mtime: 1, isSelection: true, lineStart: 5 };
+    const received: unknown[] = [];
+    const { controller, queue, readNote } = setup({ activeSelection: () => selected, answer: async (question, _history, context) => {
+      received.push(context);
+      return answer(question);
+    } });
+    await controller.initialize();
+    const gate = deferred();
+    const blocking = queue.enqueue(() => gate.promise);
+    const request = controller.send(controller.activeDialog!.id, '/fmt');
+    selected.content = 'Changed selection';
+    gate.resolve();
+    await blocking;
+    await request;
+    expect(received).toEqual([{ ...selected, content: 'Original selected text' }]);
+    expect(readNote).not.toHaveBeenCalled();
+  });
+  it('rejects oversized selection before queuing or changing history', async () => {
+    const { controller, queue } = setup({ activeSelection: () => ({ path: 'Note.md', title: 'Note', content: 'x'.repeat(12001), mtime: 1, isSelection: true }) });
+    await controller.initialize();
+    await expect(controller.send(controller.activeDialog!.id, '/fmt')).rejects.toThrow(/не обрезать/);
+    expect(controller.activeDialog!.entries).toEqual([]);
+    expect(queue.pendingCount).toBe(0);
+  });
   it('caps dialogs at ten and captures the active note separately for each new dialog', async () => {
     let path: string | null = 'First.md';
     const { controller } = setup({ activeNotePath: () => path });

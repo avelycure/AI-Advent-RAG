@@ -119,6 +119,7 @@ function compactSource(source: SearchResult): SearchResult {
     score: source.score,
     contextTruncated: source.contextTruncated,
     isActiveNote: source.isActiveNote,
+    isSelection: source.isSelection,
     chunk: {
       ordinal: source.chunk.ordinal,
       text: '',
@@ -176,6 +177,7 @@ function sanitizeSources(value: unknown): SearchResult[] | undefined {
       score,
       contextTruncated: booleanOrUndefined(record.contextTruncated),
       isActiveNote: booleanOrUndefined(record.isActiveNote),
+      isSelection: booleanOrUndefined(record.isSelection),
       chunk: {
         ordinal: finiteNumber(chunkRecord.ordinal) ?? 0,
         text: '',

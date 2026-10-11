@@ -469,7 +469,9 @@ export class ChatView extends ItemView {
       });
       item.createSpan({
         cls: 'ai-advent-rag-score',
-        text: source.isActiveNote
+        text: source.isSelection
+          ? ` · выделенный текст · С ${source.chunk.metadata.line_start}–${source.chunk.metadata.line_end}`
+          : source.isActiveNote
           ? ` · закреплённая заметка${source.contextTruncated ? ' · первые 12 000 символов' : ''}`
           : ` · sim ${source.score.toFixed(3)} · С ${source.chunk.metadata.line_start}–${source.chunk.metadata.line_end}${source.contextTruncated ? ' · текст обрезан до лимита' : ''}`,
       });

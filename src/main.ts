@@ -21,6 +21,7 @@ import { DEFAULT_SETTINGS, sanitizeSettings } from './settings/defaults';
 import { AiAdventRagSettingsTab } from './settings/settings-tab';
 import { CHAT_VIEW_TYPE, ChatView } from './ui/chat-view';
 import { insertAnswer } from './ui/insert-answer';
+import { selectionContext } from './ui/selection-context';
 import { ChatStateRepository } from './ui/chat-state-repository';
 import type {
   ActiveNoteContext,
@@ -90,6 +91,7 @@ export default class AiAdventRagPlugin extends Plugin {
         return active?.extension === 'md' ? active.path : this.lastActiveNotePath;
       },
       readNote: (path) => this.readNoteContext(path),
+      activeSelection: () => this.readActiveSelection(),
       answer: (question, history, context, onProgress, signal, parameters) => this.answerQuestion(question, history, onProgress, context, signal, parameters),
       onError: (message) => { new Notice(message); },
     });
@@ -301,6 +303,16 @@ export default class AiAdventRagPlugin extends Plugin {
     }
     const view = this.app.workspace.getMostRecentLeaf(this.app.workspace.rootSplit)?.view;
     insertAnswer(view instanceof MarkdownView && view.getMode() === 'source' ? view.editor : undefined, text);
+  }
+
+  private readActiveSelection(): ActiveNoteContext | undefined {
+    const active = this.app.workspace.activeEditor;
+    if (active?.file?.extension === 'md' && active.editor) {
+      return selectionContext(active.editor, { path: active.file.path, title: active.file.basename, mtime: active.file.stat.mtime });
+    }
+    const view = this.app.workspace.getMostRecentLeaf(this.app.workspace.rootSplit)?.view;
+    if (!(view instanceof MarkdownView) || view.getMode() !== 'source' || !view.file) return undefined;
+    return selectionContext(view.editor, { path: view.file.path, title: view.file.basename, mtime: view.file.stat.mtime });
   }
 
   private async readNoteContext(path: string): Promise<ActiveNoteContext> {

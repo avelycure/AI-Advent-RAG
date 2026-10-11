@@ -80,6 +80,18 @@ describe('streaming RAG chat without context gates or task memory', () => {
     expect(llm.calls[1]?.at(-1)?.content).toContain('Выбранная страница в формате JSON:');
   });
 
+  it('passes selected text as the primary source and targets only that fragment', async () => {
+    const llm = new Llm();
+    const selection = { path: 'Active.md', title: 'Active', content: 'Выделенный текст.\nВторая строка.', mtime: 1, isSelection: true, lineStart: 8 };
+    const result = await new RagService(new Embeddings(), llm).answer('Исправь ошибки', indexSnapshot([]), config, options, [], undefined, undefined, selection);
+    expect(result.sources[0]?.isSelection).toBe(true);
+    expect(result.sources[0]?.chunk.text).toBe(selection.content);
+    expect(result.sources[0]?.chunk.metadata.line_start).toBe(8);
+    expect(result.sources[0]?.chunk.metadata.line_end).toBe(9);
+    expect(llm.calls[1]?.[0]?.content).toContain('Изменяй только выделенный фрагмент');
+    expect(llm.calls[1]?.at(-1)?.content).toContain('Применяй к этому тексту');
+  });
+
   it('still rejects invalid user input and missing index', async () => {
     const service = new RagService(new Embeddings(), new Llm());
     await expect(service.answer(' ', null, config, options)).rejects.toThrow(/Введите/);
