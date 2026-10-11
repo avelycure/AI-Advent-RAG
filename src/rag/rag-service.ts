@@ -57,7 +57,7 @@ export class RagService {
     };
     onProgress?.({ kind: 'stage', text: 'Qwen готовит ответ…' });
     const text = await this.llm.generate(
-      buildChatRagMessages(normalizedQuestion, sources, history),
+      buildChatRagMessages(normalizedQuestion, sources, history, activeNote),
       llmConfig,
       onProgress ? (delta) => onProgress({ kind: 'text', text: delta }) : undefined,
     );

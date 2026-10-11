@@ -167,6 +167,27 @@
   display: flex;
   flex-direction: column;
   gap: var(--size-4-2);
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-primary);
+}
+
+.ai-advent-rag-composer:focus-within {
+  border-color: var(--interactive-accent);
+}
+
+.ai-advent-rag-composer .ai-advent-rag-question {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 4px;
+}
+
+.ai-advent-rag-context-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .ai-advent-rag-error {
@@ -334,7 +355,24 @@
   flex: 0 0 auto;
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 4px 3px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: var(--background-secondary);
 }
+.ai-advent-rag-context-icon { display: flex; flex: 0 0 auto; color: var(--text-accent); }
+.ai-advent-rag-context-icon svg { width: 14px; height: 14px; }
+.ai-advent-rag-note-context .ai-advent-rag-icon-button {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  padding: 3px;
+  border: 0;
+  border-radius: 50%;
+}
+.ai-advent-rag-note-context .ai-advent-rag-icon-button svg { width: 12px; height: 12px; }
 .ai-advent-rag-note-context span {
   overflow: hidden;
   text-overflow: ellipsis;

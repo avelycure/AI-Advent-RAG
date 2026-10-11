@@ -38,6 +38,7 @@ describe('streaming RAG chat without context gates or task memory', () => {
     expect(answer.groundingStatus).toBe('not-applicable');
     expect(llm.calls).toHaveLength(2);
     expect(JSON.stringify(llm.calls)).not.toMatch(/Память задачи|Обнови структурированную|not_enough_context/);
+    expect(llm.calls[1]?.[0]?.content).not.toContain('Пользователь выбрал страницу');
     expect(llm.calls[1]).toContainEqual({ role: 'user', content: 'Предыдущий вопрос' });
   });
   it('generates an answer when filtering removes every source', async () => {
@@ -75,6 +76,8 @@ describe('streaming RAG chat without context gates or task memory', () => {
     expect(answer.sources[0]?.contextTruncated).toBe(true);
     expect(JSON.stringify(llm.calls[0])).toContain('Active.md');
     expect(JSON.stringify(llm.calls[1])).toContain('Текущая страница.');
+    expect(llm.calls[1]?.[0]?.content).toContain('Выполняй действие из текущего сообщения пользователя над этой страницей');
+    expect(llm.calls[1]?.at(-1)?.content).toContain('Выбранная страница в формате JSON:');
   });
 
   it('still rejects invalid user input and missing index', async () => {

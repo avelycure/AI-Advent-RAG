@@ -79,13 +79,6 @@ export class ChatView extends ItemView {
     if (!dialog) return;
     const runtime = controller.runtime(dialog.id);
     const busy = runtime.phase !== 'idle';
-    if (dialog.contextPath) {
-      const context = container.createDiv({ cls: 'ai-advent-rag-note-context' });
-      context.createSpan({ text: dialog.contextPath, attr: { title: `Закреплённая заметка: ${dialog.contextPath}` } });
-      this.contextRemoveButton = this.iconButton(context, 'x', 'Убрать закреплённую заметку');
-      this.contextRemoveButton.disabled = runtime.phase === 'running';
-      this.contextRemoveButton.addEventListener('click', () => this.action(() => controller.removeContext(dialog.id)));
-    }
     const messages = container.createDiv({ cls: 'ai-advent-rag-messages', attr: { role: 'list', 'aria-busy': busy ? 'true' : 'false' } });
     this.messagesEl = messages;
     this.renderEntries(messages);
@@ -151,6 +144,19 @@ export class ChatView extends ItemView {
     add.disabled = controller.state.dialogs.length >= MAX_DIALOGS;
     add.addEventListener('click', () => this.action(() => { controller.createDialog(); }));
     const composer = container.createDiv({ cls: 'ai-advent-rag-composer' });
+    if (dialog.contextPath) {
+      const chips = composer.createDiv({ cls: 'ai-advent-rag-context-chips' });
+      const context = chips.createDiv({ cls: 'ai-advent-rag-note-context' });
+      const noteIcon = context.createDiv({ cls: 'ai-advent-rag-context-icon', attr: { 'aria-hidden': 'true' } });
+      setIcon(noteIcon, 'file-text');
+      context.createSpan({
+        text: dialog.contextPath.split('/').at(-1)!.replace(/\.md$/u, ''),
+        attr: { title: `Страница в контексте запроса: ${dialog.contextPath}` },
+      });
+      this.contextRemoveButton = this.iconButton(context, 'x', 'Убрать страницу из контекста');
+      this.contextRemoveButton.disabled = runtime.phase === 'running';
+      this.contextRemoveButton.addEventListener('click', () => this.action(() => controller.removeContext(dialog.id)));
+    }
     const inputId = `ai-advent-rag-question-${dialog.id}`;
     const query = composer.createEl('textarea', { cls: 'ai-advent-rag-question',
       attr: { id: inputId, 'aria-label': 'Сообщение', placeholder: 'Сообщение… Enter — отправить, Shift+Enter — новая строка', rows: '2', maxlength: '4000' } });
