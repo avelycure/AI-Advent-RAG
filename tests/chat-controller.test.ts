@@ -22,6 +22,29 @@ function setup(overrides: Partial<ChatControllerApi> = {}) {
 }
 
 describe('independent queued dialogs', () => {
+  it('persists reordered dialogs without changing selection, drafts or queued answers', async () => {
+    const { controller, queue, saved } = setup();
+    await controller.initialize();
+    const first = controller.activeDialog!;
+    const second = controller.createDialog();
+    const third = controller.createDialog();
+    controller.drafts.set(second.id, 'Draft');
+    const gate = deferred();
+    const blocking = queue.enqueue(() => gate.promise);
+    const request = controller.send(first.id, 'Question');
+    controller.moveDialog(first.id, third.id, true);
+    expect(saved().dialogs.map((dialog) => dialog.id)).toEqual([second.id, third.id, first.id]);
+    expect(controller.activeDialog?.id).toBe(third.id);
+    expect(controller.drafts.get(second.id)).toBe('Draft');
+    controller.moveDialog(first.id, second.id);
+    expect(saved().dialogs.map((dialog) => dialog.id)).toEqual([first.id, second.id, third.id]);
+    expect(() => controller.moveDialog(first.id, 'missing')).toThrow(/не найден/);
+    gate.resolve();
+    await blocking;
+    await request;
+    expect(first.entries.map((entry) => entry.content)).toEqual(['Question', 'Question']);
+    expect(saved().dialogs.map((dialog) => dialog.id)).toEqual([first.id, second.id, third.id]);
+  });
   it('caps dialogs at ten and captures the active note separately for each new dialog', async () => {
     let path: string | null = 'First.md';
     const { controller } = setup({ activeNotePath: () => path });

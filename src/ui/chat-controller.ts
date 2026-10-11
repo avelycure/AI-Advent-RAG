@@ -77,6 +77,17 @@ export class ChatController {
     this.state.activeDialogId = id;
     this.changed();
   }
+  moveDialog(id: string, targetId: string, after = false): void {
+    const dialog = this.requireDialog(id);
+    this.requireDialog(targetId);
+    if (id === targetId) return;
+    const reordered = this.state.dialogs.filter((item) => item.id !== id);
+    const targetIndex = reordered.findIndex((item) => item.id === targetId);
+    reordered.splice(targetIndex + (after ? 1 : 0), 0, dialog);
+    if (reordered.every((item, index) => item === this.state.dialogs[index])) return;
+    this.state.dialogs = reordered;
+    this.changed();
+  }
   removeContext(id: string): void {
     if (this.runtime(id).phase === 'running') throw new Error('Дождитесь ответа, чтобы убрать заметку из контекста.');
     this.requireDialog(id).contextPath = null;

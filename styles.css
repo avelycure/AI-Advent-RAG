@@ -294,6 +294,9 @@
   border: 1px solid transparent;
   border-radius: 8px;
 }
+.ai-advent-rag-dialog-tab.is-dragging { opacity: 0.4; }
+.ai-advent-rag-dialog-tab.is-drop-before { box-shadow: -2px 0 0 var(--interactive-accent); }
+.ai-advent-rag-dialog-tab.is-drop-after { box-shadow: 2px 0 0 var(--interactive-accent); }
 .ai-advent-rag-dialog-tab.is-active {
   border-color: var(--interactive-accent);
   border-color: color-mix(in srgb, var(--interactive-accent) 65%, var(--background-modifier-border));

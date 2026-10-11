@@ -19,6 +19,7 @@ export class ChatView extends ItemView {
   private messagesEl?: HTMLElement;
   private contextRemoveButton?: HTMLButtonElement;
   private tabs = new Map<string, HTMLButtonElement>();
+  private draggedDialogId?: string;
 
   constructor(leaf: WorkspaceLeaf, private readonly pluginApi: ChatPluginApi) { super(leaf); }
   getViewType(): string { return CHAT_VIEW_TYPE; }
@@ -104,7 +105,40 @@ export class ChatView extends ItemView {
       tab.toggleClass('is-active', item.id === dialog.id);
       tab.setAttribute('aria-pressed', item.id === dialog.id ? 'true' : 'false');
       tab.createSpan({ cls: 'ai-advent-rag-dialog-number', text: String(index + 1), attr: { 'aria-hidden': 'true' } });
-      tab.setAttribute('title', `${item.title} · клик двумя пальцами — удалить`);
+      tab.setAttribute('title', `${item.title} · перетащите, чтобы изменить порядок · клик двумя пальцами — удалить`);
+      tab.draggable = true;
+      tab.addEventListener('dragstart', (event) => {
+        this.draggedDialogId = item.id;
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', item.id);
+        }
+        tab.addClass('is-dragging');
+      });
+      tab.addEventListener('dragover', (event) => {
+        if (!this.draggedDialogId || this.draggedDialogId === item.id) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+        const after = event.clientX > tab.getBoundingClientRect().left + tab.offsetWidth / 2;
+        tab.toggleClass('is-drop-before', !after);
+        tab.toggleClass('is-drop-after', after);
+      });
+      tab.addEventListener('dragleave', () => {
+        tab.removeClass('is-drop-before', 'is-drop-after');
+      });
+      tab.addEventListener('drop', (event) => {
+        const sourceId = this.draggedDialogId;
+        if (!sourceId) return;
+        event.preventDefault();
+        const after = event.clientX > tab.getBoundingClientRect().left + tab.offsetWidth / 2;
+        this.draggedDialogId = undefined;
+        this.action(() => controller.moveDialog(sourceId, item.id, after));
+        for (const button of this.tabs.values()) button.removeClass('is-dragging', 'is-drop-before', 'is-drop-after');
+      });
+      tab.addEventListener('dragend', () => {
+        this.draggedDialogId = undefined;
+        for (const button of this.tabs.values()) button.removeClass('is-dragging', 'is-drop-before', 'is-drop-after');
+      });
       tab.addEventListener('click', () => this.action(() => controller.selectDialog(item.id)));
       tab.addEventListener('contextmenu', (event) => {
         event.preventDefault();
