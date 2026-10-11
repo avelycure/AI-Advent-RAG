@@ -290,11 +290,16 @@
   color: var(--text-muted);
 }
 .ai-advent-rag-icon-button svg { width: 16px; height: 16px; }
+.ai-advent-rag-dialog-tab {
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
 .ai-advent-rag-dialog-tab.is-active {
-  outline: 2px solid var(--interactive-accent);
-  outline-offset: -2px;
-  color: var(--text-normal);
-  background: var(--background-secondary);
+  border-color: var(--interactive-accent);
+  border-color: color-mix(in srgb, var(--interactive-accent) 65%, var(--background-modifier-border));
+  color: var(--text-accent);
+  background: var(--background-primary);
+  background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-primary));
 }
 .ai-advent-rag-dialog-tab.is-busy {
   color: var(--text-warning);
