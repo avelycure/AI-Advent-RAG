@@ -155,7 +155,7 @@ export class ChatView extends ItemView {
     }
     const inputId = `ai-advent-rag-question-${dialog.id}`;
     const query = composer.createEl('textarea', { cls: 'ai-advent-rag-question',
-      attr: { id: inputId, 'aria-label': 'Сообщение', placeholder: 'Сообщение… Enter — отправить, Shift+Enter — новая строка', rows: '2', maxlength: '4000' } });
+      attr: { id: inputId, 'aria-label': 'Сообщение', rows: '2', maxlength: '4000' } });
     this.queryEl = query;
     query.value = controller.drafts.get(dialog.id) ?? '';
     query.disabled = busy;
