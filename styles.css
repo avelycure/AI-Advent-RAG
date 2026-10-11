@@ -173,7 +173,7 @@
   background: var(--background-primary);
 }
 
-.ai-advent-rag-composer:focus-within {
+.ai-advent-rag-composer:has(.ai-advent-rag-question:focus) {
   border-color: var(--interactive-accent);
 }
 
