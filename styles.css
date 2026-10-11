@@ -258,7 +258,7 @@
   .ai-advent-rag-message.is-pending .ai-advent-rag-message-label::after { animation: none; }
 }
 
-/* Compact navigation stays below the composer; conversation owns the remaining height. */
+/* Compact navigation sits above the composer; conversation owns the remaining height. */
 .ai-advent-rag-dialog-menu {
   display: flex;
   align-items: center;

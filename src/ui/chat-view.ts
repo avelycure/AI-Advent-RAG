@@ -96,6 +96,26 @@ export class ChatView extends ItemView {
       this.liveBody = pending.createDiv({ cls: 'ai-advent-rag-message-body', text: runtime.text });
     }
     if (runtime.error) messages.createDiv({ cls: 'ai-advent-rag-error', text: runtime.error, attr: { role: 'alert' } });
+    const navigation = container.createEl('nav', { cls: 'ai-advent-rag-dialog-menu', attr: { 'aria-label': 'Диалоги' } });
+    const tabs = navigation.createDiv({ cls: 'ai-advent-rag-dialog-tabs' });
+    controller.state.dialogs.forEach((item, index) => {
+      const tab = this.iconButton(tabs, 'file-text', item.title);
+      tab.addClass('ai-advent-rag-dialog-tab');
+      tab.toggleClass('is-active', item.id === dialog.id);
+      tab.setAttribute('aria-pressed', item.id === dialog.id ? 'true' : 'false');
+      tab.createSpan({ cls: 'ai-advent-rag-dialog-number', text: String(index + 1), attr: { 'aria-hidden': 'true' } });
+      tab.setAttribute('title', `${item.title} · клик двумя пальцами — удалить`);
+      tab.addEventListener('click', () => this.action(() => controller.selectDialog(item.id)));
+      tab.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.action(() => controller.deleteDialog(item.id));
+      });
+      this.tabs.set(item.id, tab);
+    });
+    const add = this.iconButton(tabs, 'plus', 'Новый диалог');
+    add.disabled = controller.state.dialogs.length >= MAX_DIALOGS;
+    add.addEventListener('click', () => this.action(() => { controller.createDialog(); }));
     const composer = container.createDiv({ cls: 'ai-advent-rag-composer' });
     const inputId = `ai-advent-rag-question-${dialog.id}`;
     const query = composer.createEl('textarea', { cls: 'ai-advent-rag-question',
@@ -117,26 +137,6 @@ export class ChatView extends ItemView {
         submit();
       }
     });
-    const footer = container.createEl('nav', { cls: 'ai-advent-rag-dialog-menu', attr: { 'aria-label': 'Диалоги' } });
-    const tabs = footer.createDiv({ cls: 'ai-advent-rag-dialog-tabs' });
-    controller.state.dialogs.forEach((item, index) => {
-      const tab = this.iconButton(tabs, 'file-text', item.title);
-      tab.addClass('ai-advent-rag-dialog-tab');
-      tab.toggleClass('is-active', item.id === dialog.id);
-      tab.setAttribute('aria-pressed', item.id === dialog.id ? 'true' : 'false');
-      tab.createSpan({ cls: 'ai-advent-rag-dialog-number', text: String(index + 1), attr: { 'aria-hidden': 'true' } });
-      tab.setAttribute('title', `${item.title} · клик двумя пальцами — удалить`);
-      tab.addEventListener('click', () => this.action(() => controller.selectDialog(item.id)));
-      tab.addEventListener('contextmenu', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        this.action(() => controller.deleteDialog(item.id));
-      });
-      this.tabs.set(item.id, tab);
-    });
-    const add = this.iconButton(tabs, 'plus', 'Новый диалог');
-    add.disabled = controller.state.dialogs.length >= MAX_DIALOGS;
-    add.addEventListener('click', () => this.action(() => { controller.createDialog(); }));
     this.refreshTabs();
     messages.scrollTop = messages.scrollHeight;
     if (restoreFocus && !busy) { query.focus(); query.setSelectionRange(selection, selection); }
