@@ -138,7 +138,10 @@ export class ChatView extends ItemView {
     });
     const add = this.iconButton(tabs, 'plus', 'Новый диалог');
     add.disabled = controller.state.dialogs.length >= MAX_DIALOGS;
-    add.addEventListener('click', () => this.action(() => { controller.createDialog(); }));
+    add.addEventListener('click', () => this.action(() => {
+      controller.createDialog();
+      this.queryEl?.focus();
+    }));
     const composer = container.createDiv({ cls: 'ai-advent-rag-composer' });
     if (dialog.contextPath) {
       const chips = composer.createDiv({ cls: 'ai-advent-rag-context-chips' });
