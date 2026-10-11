@@ -93,7 +93,7 @@ export default class AiAdventRagPlugin extends Plugin {
     try { await this.chatController.initialize(false); }
     catch (error) { new Notice(error instanceof Error ? error.message : String(error)); }
     this.registerView(CHAT_VIEW_TYPE, (leaf) => new ChatView(leaf, this));
-    this.addRibbonIcon('message-circle', 'Открыть чат с локальной Qwen', () => {
+    this.addRibbonIcon('sparkles', 'Открыть чат с локальной Qwen', () => {
       void this.activateChatView();
     });
     this.addCommand({

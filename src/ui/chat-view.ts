@@ -24,7 +24,7 @@ export class ChatView extends ItemView {
   constructor(leaf: WorkspaceLeaf, private readonly pluginApi: ChatPluginApi) { super(leaf); }
   getViewType(): string { return CHAT_VIEW_TYPE; }
   getDisplayText(): string { return 'Диалоги с Qwen'; }
-  getIcon(): string { return 'message-circle'; }
+  getIcon(): string { return 'sparkles'; }
 
   async onOpen(): Promise<void> {
     try {
