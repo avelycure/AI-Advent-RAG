@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Private AI · локальный чат</title><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
+<body><main>
+<header><div class="mark">◈</div><div><p class="eyebrow">ДЕНЬ 30 · ДОМАШНИЙ СЕРВИС</p><h1>Private AI</h1></div><span class="badge">Локальная Qwen</span></header>
+<section class="access"><label for="key">API-ключ</label><div class="access-row"><input id="key" type="password" autocomplete="off" placeholder="Ключ из файла api-key.txt"><button id="connect">Подключиться</button></div><p id="connection" role="status">Ключ хранится только в памяти этой вкладки. История чата не сохраняется на сервере.</p></section>
+<section id="limits" class="limits" aria-label="Ограничения сервиса"><span>1 запрос к модели одновременно</span><span>Контекст до 8192 токенов</span><span>3 запроса / минуту</span></section>
+<section id="messages" class="messages" aria-label="Сообщения" aria-live="polite"><div id="welcome" class="welcome"><span>◈</span><h2>Разговор остаётся дома</h2><p>Подключитесь и отправьте первый запрос.<br>Ответ появится здесь по мере генерации.</p></div></section>
+<div id="activity" class="activity" role="status"></div>
+<form id="composer"><label class="sr-only" for="question">Сообщение</label><textarea id="question" rows="3" placeholder="Напишите сообщение…" disabled></textarea><div class="composer-footer"><span>Enter — отправить · Shift+Enter — новая строка</span><button id="stop" type="button" hidden>Отменить</button><button id="send" disabled>Отправить ↑</button></div></form>
+<footer><button id="clear">Новый разговор</button><span>HTTP внутри домашней сети · без облачных моделей</span></footer>
+</main></body></html>

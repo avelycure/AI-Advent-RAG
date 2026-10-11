@@ -1,0 +1,202 @@
+{
+  "timestamp": "2026-10-11T20:33:57.174Z",
+  "networkUrl": "http://192.168.0.135:8787",
+  "client": "тот же Mac, обращение к LAN-адресу",
+  "checks": [
+    {
+      "name": "API key required",
+      "pass": true,
+      "details": 401
+    },
+    {
+      "name": "LAN HTTP access",
+      "pass": true,
+      "details": {
+        "model": "qwen3.8:27b",
+        "running": false,
+        "waiting": 0,
+        "stats": {
+          "completed": 4,
+          "failed": 0,
+          "cancelled": 0
+        },
+        "limits": {
+          "maxContext": 8192,
+          "maxOutput": 1024,
+          "maxInputBytes": 4096,
+          "maxQueue": 8,
+          "requestsPerMinute": 10
+        }
+      }
+    },
+    {
+      "name": "max context rejected",
+      "pass": true,
+      "details": {
+        "error": "num_ctx: 4096–8192"
+      }
+    },
+    {
+      "name": "input budget rejected",
+      "pass": true,
+      "details": {
+        "error": "Контекст слишком большой: сократите историю или текст"
+      }
+    },
+    {
+      "name": "three real Qwen responses completed",
+      "pass": true,
+      "details": [
+        "done",
+        "done",
+        "done"
+      ]
+    },
+    {
+      "name": "real requests waited in queue",
+      "pass": true,
+      "details": [
+        0.09400000001187436,
+        1875.4368749999849,
+        3639.521792000014
+      ]
+    },
+    {
+      "name": "real server rate limit",
+      "pass": true,
+      "details": {
+        "statuses": [
+          400,
+          400,
+          400,
+          400,
+          400,
+          429
+        ],
+        "retryAfter": "55"
+      }
+    }
+  ],
+  "responses": [
+    {
+      "httpStatus": 200,
+      "prompt": "Ответь одним словом: привет.",
+      "text": "Привет",
+      "statuses": [
+        {
+          "type": "status",
+          "phase": "queued",
+          "position": 1
+        },
+        {
+          "type": "status",
+          "phase": "running",
+          "position": 0
+        }
+      ],
+      "final": {
+        "type": "done",
+        "model": "qwen3.8:27b",
+        "truncated": false,
+        "metrics": {
+          "queueMs": 0.09400000001187436,
+          "elapsedMs": 1876.1689999999944,
+          "firstTokenMs": 1452.506457999989,
+          "inputTokens": 56,
+          "outputTokens": 4,
+          "generationMs": 425.522,
+          "tokensPerSecond": 9.400219025103285
+        }
+      }
+    },
+    {
+      "httpStatus": 200,
+      "prompt": "Сколько будет 2 + 2? Ответь только числом.",
+      "text": "4",
+      "statuses": [
+        {
+          "type": "status",
+          "phase": "queued",
+          "position": 1
+        },
+        {
+          "type": "status",
+          "phase": "queued",
+          "position": 1
+        },
+        {
+          "type": "status",
+          "phase": "running",
+          "position": 0
+        }
+      ],
+      "final": {
+        "type": "done",
+        "model": "qwen3.8:27b",
+        "truncated": false,
+        "metrics": {
+          "queueMs": 1875.4368749999849,
+          "elapsedMs": 1762.6627090000256,
+          "firstTokenMs": 1336.8165840000147,
+          "inputTokens": 65,
+          "outputTokens": 2,
+          "generationMs": 425.22,
+          "tokensPerSecond": 4.703447627110672
+        }
+      }
+    },
+    {
+      "httpStatus": 200,
+      "prompt": "Назови столицу Франции. Ответь одним словом.",
+      "text": "Париж",
+      "statuses": [
+        {
+          "type": "status",
+          "phase": "queued",
+          "position": 2
+        },
+        {
+          "type": "status",
+          "phase": "queued",
+          "position": 1
+        },
+        {
+          "type": "status",
+          "phase": "running",
+          "position": 0
+        }
+      ],
+      "final": {
+        "type": "done",
+        "model": "qwen3.8:27b",
+        "truncated": false,
+        "metrics": {
+          "queueMs": 3639.521792000014,
+          "elapsedMs": 2198.7273749999877,
+          "firstTokenMs": 1347.8802079999878,
+          "inputTokens": 61,
+          "outputTokens": 4,
+          "generationMs": 849.527,
+          "tokensPerSecond": 4.708502496094885
+        }
+      }
+    }
+  ],
+  "after": {
+    "model": "qwen3.8:27b",
+    "running": false,
+    "waiting": 0,
+    "stats": {
+      "completed": 7,
+      "failed": 0,
+      "cancelled": 0
+    },
+    "limits": {
+      "maxContext": 8192,
+      "maxOutput": 1024,
+      "maxInputBytes": 4096,
+      "maxQueue": 8,
+      "requestsPerMinute": 10
+    }
+  }
+}
