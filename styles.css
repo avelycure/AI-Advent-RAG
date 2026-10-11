@@ -1,8 +1,11 @@
 .ai-advent-rag-view {
   display: flex;
   flex-direction: column;
-  gap: var(--size-4-3);
-  padding: var(--size-4-3);
+  gap: var(--size-4-2);
+  padding: var(--size-4-2);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .ai-advent-rag-error {
@@ -33,7 +36,7 @@
   flex: 1 1 auto;
   flex-direction: column;
   gap: var(--size-4-3);
-  min-height: 12rem;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -134,7 +137,8 @@
 }
 
 .ai-advent-rag-question {
-  min-height: 7rem;
+  min-height: 3rem;
+  max-height: 8rem;
   resize: vertical;
   width: 100%;
 }
@@ -212,34 +216,84 @@
   .ai-advent-rag-message.is-pending .ai-advent-rag-message-label::after { animation: none; }
 }
 
+/* Compact navigation stays below the composer; conversation owns the remaining height. */
+.ai-advent-rag-dialog-menu {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 6px;
+}
 .ai-advent-rag-dialog-tabs {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--size-4-1);
-  margin-bottom: var(--size-4-2);
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 2px;
 }
-.ai-advent-rag-dialog-tabs button {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.ai-advent-rag-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  padding: 4px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
 }
-.ai-advent-rag-dialog-tabs button.is-active {
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
+.ai-advent-rag-icon-button svg { width: 16px; height: 16px; }
+.ai-advent-rag-dialog-tab.is-active {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+  color: var(--text-normal);
+  background: var(--background-secondary);
 }
-.ai-advent-rag-dialog-actions {
-  display: flex;
-  gap: var(--size-4-2);
-  margin-bottom: var(--size-4-2);
+.ai-advent-rag-dialog-tab.is-busy {
+  color: var(--text-warning);
+  background: var(--background-modifier-message);
 }
+.ai-advent-rag-dialog-tab.is-busy::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-warning);
+}
+.ai-advent-rag-dialog-number {
+  position: absolute;
+  right: 2px;
+  bottom: 0;
+  font-size: 9px;
+  line-height: 1;
+  background: var(--background-primary);
+  border-radius: 2px;
+}
+.ai-advent-rag-dialog-actions { display: flex; gap: 2px; flex: 0 0 auto; }
 .ai-advent-rag-note-context {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--size-4-2);
-  background: var(--background-secondary);
-  border-radius: var(--radius-s);
-  padding: var(--size-4-2);
-  margin-bottom: var(--size-4-2);
-  overflow-wrap: anywhere;
+  gap: 4px;
+  flex: 0 0 auto;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
 }
+.ai-advent-rag-note-context span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.ai-advent-rag-composer { flex: 0 0 auto; }
+.ai-advent-rag-composer-controls { justify-content: flex-end; }
+.ai-advent-rag-source-details { margin-top: 6px; font-size: var(--font-ui-smaller); }
+.ai-advent-rag-source-details summary { cursor: pointer; color: var(--text-muted); }
+.ai-advent-rag-message[hidden] { display: none; }

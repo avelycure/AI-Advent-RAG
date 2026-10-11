@@ -1,4 +1,4 @@
-import { ItemView, Notice, WorkspaceLeaf } from 'obsidian';
+import { ItemView, Notice, setIcon, WorkspaceLeaf } from 'obsidian';
 import { citationParts, sourceLinkText } from '../retrieval/citations';
 import type { GroundedCitation, RetrievalDiagnostics, SearchResult } from '../types';
 import { MAX_DIALOGS } from './chat-state';
@@ -13,9 +13,8 @@ export interface ChatPluginApi {
 export class ChatView extends ItemView {
   private unsubscribe?: () => void;
   private queryEl?: HTMLTextAreaElement;
-  private statusEl?: HTMLElement;
-  private queueEl?: HTMLElement;
   private activityEl?: HTMLElement;
+  private pendingEl?: HTMLElement;
   private liveBody?: HTMLElement;
   private messagesEl?: HTMLElement;
   private contextRemoveButton?: HTMLButtonElement;
@@ -45,10 +44,22 @@ export class ChatView extends ItemView {
   private action(run: () => void): void {
     try { run(); } catch (error) { new Notice(error instanceof Error ? error.message : String(error)); }
   }
-  private tabLabel(id: string, title: string): string {
-    const runtime = this.pluginApi.chatController.runtime(id);
-    return runtime.phase === 'queued' ? `${title} · очередь ${runtime.position}`
-      : runtime.phase === 'running' ? `${title} · ●` : runtime.error ? `${title} · ошибка` : title;
+  private iconButton(container: HTMLElement, icon: string, label: string): HTMLButtonElement {
+    const button = container.createEl('button', {
+      cls: 'ai-advent-rag-icon-button', attr: { 'aria-label': label, title: label },
+    });
+    setIcon(button, icon);
+    return button;
+  }
+
+  private refreshTabs(): void {
+    const controller = this.pluginApi.chatController;
+    for (const dialog of controller.state.dialogs) {
+      const tab = this.tabs.get(dialog.id);
+      const busy = controller.runtime(dialog.id).phase !== 'idle';
+      tab?.toggleClass('is-busy', busy);
+      tab?.setAttribute('aria-label', `${dialog.title}${busy ? ' · запрос выполняется или ожидает выполнения' : ''}`);
+    }
   }
 
   private render(): void {
@@ -61,65 +72,41 @@ export class ChatView extends ItemView {
     container.addClass('ai-advent-rag-view');
     this.tabs.clear();
     this.activityEl = undefined;
+    this.pendingEl = undefined;
     this.liveBody = undefined;
     this.contextRemoveButton = undefined;
-    const header = container.createDiv({ cls: 'ai-advent-rag-chat-header' });
-    header.createEl('h3', { text: `Диалоги с Qwen · ${controller.state.dialogs.length}/${MAX_DIALOGS}` });
-    const add = header.createEl('button', { text: '+ новый диалог' });
-    add.disabled = controller.state.dialogs.length >= MAX_DIALOGS;
-    add.addEventListener('click', () => this.action(() => { controller.createDialog(); }));
-    const tabs = container.createDiv({ cls: 'ai-advent-rag-dialog-tabs', attr: { role: 'group', 'aria-label': 'Диалоги' } });
-    for (const item of controller.state.dialogs) {
-      const tab = tabs.createEl('button', {
-        text: this.tabLabel(item.id, item.title),
-        cls: item.id === dialog?.id ? 'is-active' : '',
-        attr: { 'aria-pressed': item.id === dialog?.id ? 'true' : 'false', title: item.title },
-      });
-      tab.addEventListener('click', () => this.action(() => controller.selectDialog(item.id)));
-      this.tabs.set(item.id, tab);
-    }
-    this.queueEl = container.createDiv({ cls: 'ai-advent-rag-search-status', text: controller.queueSummary });
     if (!dialog) return;
     const runtime = controller.runtime(dialog.id);
     const busy = runtime.phase !== 'idle';
-    const actions = container.createDiv({ cls: 'ai-advent-rag-dialog-actions' });
-    const clear = actions.createEl('button', { text: 'Очистить диалог' });
-    clear.disabled = busy;
-    clear.addEventListener('click', () => this.action(() => controller.clearDialog(dialog.id)));
-    const remove = actions.createEl('button', { text: 'Удалить диалог' });
-    remove.disabled = busy;
-    remove.addEventListener('click', () => this.action(() => controller.deleteDialog(dialog.id)));
     if (dialog.contextPath) {
       const context = container.createDiv({ cls: 'ai-advent-rag-note-context' });
-      context.createSpan({ text: `Контекст: ${dialog.contextPath}` });
-      this.contextRemoveButton = context.createEl('button', {
-        text: '×', attr: { 'aria-label': `Убрать ${dialog.contextPath} из контекста`, title: 'Убрать закреплённую заметку' },
-      });
+      context.createSpan({ text: dialog.contextPath, attr: { title: `Закреплённая заметка: ${dialog.contextPath}` } });
+      this.contextRemoveButton = this.iconButton(context, 'x', 'Убрать закреплённую заметку');
       this.contextRemoveButton.disabled = runtime.phase === 'running';
       this.contextRemoveButton.addEventListener('click', () => this.action(() => controller.removeContext(dialog.id)));
-    } else container.createDiv({ cls: 'ai-advent-rag-search-status', text: 'Без закреплённой заметки · поиск по хранилищу включён' });
+    }
     const messages = container.createDiv({ cls: 'ai-advent-rag-messages', attr: { role: 'list', 'aria-busy': busy ? 'true' : 'false' } });
     this.messagesEl = messages;
     this.renderEntries(messages);
     if (busy) {
       const pending = messages.createDiv({ cls: 'ai-advent-rag-message is-assistant is-pending', attr: { role: 'listitem' } });
+      this.pendingEl = pending;
+      pending.hidden = runtime.phase === 'queued';
       this.activityEl = pending.createDiv({ cls: 'ai-advent-rag-message-label', text: runtime.status, attr: { role: 'status', 'aria-live': 'polite' } });
       this.liveBody = pending.createDiv({ cls: 'ai-advent-rag-message-body', text: runtime.text });
     }
     if (runtime.error) messages.createDiv({ cls: 'ai-advent-rag-error', text: runtime.error, attr: { role: 'alert' } });
     const composer = container.createDiv({ cls: 'ai-advent-rag-composer' });
     const inputId = `ai-advent-rag-question-${dialog.id}`;
-    composer.createEl('label', { text: 'Сообщение', attr: { for: inputId } });
     const query = composer.createEl('textarea', { cls: 'ai-advent-rag-question',
-      attr: { id: inputId, placeholder: 'Задайте вопрос по заметкам…', rows: '4', maxlength: '4000' } });
+      attr: { id: inputId, 'aria-label': 'Сообщение', placeholder: 'Сообщение…', rows: '2', maxlength: '4000' } });
     this.queryEl = query;
     query.value = controller.drafts.get(dialog.id) ?? '';
     query.disabled = busy;
     query.addEventListener('input', () => { controller.drafts.set(dialog.id, query.value); });
     const controls = composer.createDiv({ cls: 'ai-advent-rag-composer-controls' });
-    this.statusEl = controls.createDiv({ cls: 'ai-advent-rag-search-status', text: runtime.status,
-      attr: { role: 'status', 'aria-live': 'polite' } });
-    const send = controls.createEl('button', { cls: 'mod-cta', text: busy ? 'Запрос отправлен' : 'Отправить' });
+    const send = this.iconButton(controls, 'arrow-up', 'Отправить сообщение');
+    send.addClass('mod-cta');
     send.disabled = busy;
     const submit = (): void => {
       const value = query.value.trim();
@@ -132,20 +119,41 @@ export class ChatView extends ItemView {
     query.addEventListener('keydown', (event) => {
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); submit(); }
     });
+    const footer = container.createEl('nav', { cls: 'ai-advent-rag-dialog-menu', attr: { 'aria-label': 'Диалоги' } });
+    const tabs = footer.createDiv({ cls: 'ai-advent-rag-dialog-tabs' });
+    controller.state.dialogs.forEach((item, index) => {
+      const tab = this.iconButton(tabs, 'file-text', item.title);
+      tab.addClass('ai-advent-rag-dialog-tab');
+      tab.toggleClass('is-active', item.id === dialog.id);
+      tab.setAttribute('aria-pressed', item.id === dialog.id ? 'true' : 'false');
+      tab.createSpan({ cls: 'ai-advent-rag-dialog-number', text: String(index + 1), attr: { 'aria-hidden': 'true' } });
+      tab.addEventListener('click', () => this.action(() => controller.selectDialog(item.id)));
+      this.tabs.set(item.id, tab);
+    });
+    const add = this.iconButton(tabs, 'plus', 'Новый диалог');
+    add.disabled = controller.state.dialogs.length >= MAX_DIALOGS;
+    add.addEventListener('click', () => this.action(() => { controller.createDialog(); }));
+    const actions = footer.createDiv({ cls: 'ai-advent-rag-dialog-actions' });
+    const clear = this.iconButton(actions, 'eraser', 'Очистить диалог');
+    clear.disabled = busy;
+    clear.addEventListener('click', () => this.action(() => controller.clearDialog(dialog.id)));
+    const remove = this.iconButton(actions, 'trash-2', 'Удалить диалог');
+    remove.disabled = busy;
+    remove.addEventListener('click', () => this.action(() => controller.deleteDialog(dialog.id)));
+    this.refreshTabs();
     messages.scrollTop = messages.scrollHeight;
     if (restoreFocus && !busy) { query.focus(); query.setSelectionRange(selection, selection); }
   }
 
   private refreshProgress(): void {
     const controller = this.pluginApi.chatController;
-    this.queueEl?.setText(controller.queueSummary);
-    for (const dialog of controller.state.dialogs) this.tabs.get(dialog.id)?.setText(this.tabLabel(dialog.id, dialog.title));
+    this.refreshTabs();
     const dialog = controller.activeDialog;
     if (!dialog) return;
     const runtime = controller.runtime(dialog.id);
     this.contextRemoveButton && (this.contextRemoveButton.disabled = runtime.phase === 'running');
     this.activityEl?.setText(runtime.status);
-    this.statusEl?.setText(runtime.status);
+    if (this.pendingEl) this.pendingEl.hidden = runtime.phase === 'queued';
     this.liveBody?.setText(runtime.text);
     if (this.messagesEl && runtime.phase === 'running') this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   }
@@ -182,12 +190,14 @@ export class ChatView extends ItemView {
       const body = message.createDiv({ cls: 'ai-advent-rag-message-body' });
       if (entry.role === 'assistant') {
         this.renderAnswer(body, entry.content, entry.sources ?? []);
-        if (entry.usedRag) {
+        if (entry.usedRag && ((entry.sources?.length ?? 0) > 0 || entry.retrieval)) {
+          const sources = message.createEl('details', { cls: 'ai-advent-rag-source-details' });
+          sources.createEl('summary', { text: `Источники · ${entry.sources?.length ?? 0}` });
           if (entry.groundingStatus === 'grounded') {
-            this.renderGroundedCitations(message, entry.citations ?? [], entry.sources ?? []);
+            this.renderGroundedCitations(sources, entry.citations ?? [], entry.sources ?? []);
           }
-          if (entry.retrieval) this.renderRetrievalDiagnostics(message, entry.retrieval);
-          this.renderSentSources(message, entry.sources ?? [], entry.usedRetrievalEnhancements);
+          if (entry.retrieval) this.renderRetrievalDiagnostics(sources, entry.retrieval);
+          this.renderSentSources(sources, entry.sources ?? [], entry.usedRetrievalEnhancements);
         }
       } else {
         body.setText(entry.content);
