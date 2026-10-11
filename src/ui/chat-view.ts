@@ -258,6 +258,14 @@ export class ChatView extends ItemView {
       controller.createDialog();
       this.queryEl?.focus();
     }));
+    const answer = lastAssistantAnswer(dialog.entries);
+    const insert = this.iconButton(navigation, 'clipboard-paste', 'Вставить последний ответ в заметку');
+    insert.addClass('ai-advent-rag-insert-answer');
+    insert.disabled = busy || answer === undefined;
+    insert.addEventListener('pointerdown', (event) => { event.preventDefault(); });
+    insert.addEventListener('click', () => this.action(() => {
+      if (answer !== undefined) this.pluginApi.insertAnswer(answer);
+    }));
     const composer = container.createDiv({ cls: 'ai-advent-rag-composer' });
     if (dialog.contextPath) {
       const chips = composer.createDiv({ cls: 'ai-advent-rag-context-chips' });
@@ -292,14 +300,6 @@ export class ChatView extends ItemView {
         submit();
       }
     });
-    const answer = lastAssistantAnswer(dialog.entries);
-    const insert = this.iconButton(composer, 'clipboard-paste', 'Вставить последний ответ в заметку');
-    insert.addClass('ai-advent-rag-insert-answer');
-    insert.disabled = busy || answer === undefined;
-    insert.addEventListener('pointerdown', (event) => { event.preventDefault(); });
-    insert.addEventListener('click', () => this.action(() => {
-      if (answer !== undefined) this.pluginApi.insertAnswer(answer);
-    }));
     this.refreshTabs();
     messages.scrollTop = messages.scrollHeight;
     if (restoreFocus && !busy) { query.focus(); query.setSelectionRange(selection, selection); }
@@ -337,7 +337,8 @@ export class ChatView extends ItemView {
         cls: `ai-advent-rag-message is-${entry.role}`,
         attr: { role: 'listitem' },
       });
-      message.createDiv({
+      const header = message.createDiv({ cls: 'ai-advent-rag-message-header' });
+      header.createDiv({
         cls: 'ai-advent-rag-message-label',
         text: entry.role === 'user'
           ? 'Вы'
@@ -350,6 +351,25 @@ export class ChatView extends ItemView {
                 ? 'Qwen (локально) · RAG с фильтрацией'
                 : 'Qwen (локально) · базовый RAG'
               : 'Qwen (локально) · без RAG',
+      });
+      const copy = this.iconButton(header, 'copy', entry.role === 'user' ? 'Скопировать сообщение' : 'Скопировать ответ');
+      copy.addClass('ai-advent-rag-copy-message');
+      copy.addEventListener('click', () => {
+        void (async () => {
+          copy.disabled = true;
+          try {
+            const clipboard = copy.ownerDocument.defaultView?.navigator.clipboard;
+            if (!clipboard) throw new Error('Буфер обмена недоступен.');
+            await clipboard.writeText(entry.content);
+            setIcon(copy, 'check');
+            copy.setAttribute('title', 'Скопировано');
+            copy.setAttribute('aria-label', 'Скопировано');
+          } catch (error) {
+            new Notice(error instanceof Error ? error.message : String(error));
+          } finally {
+            copy.disabled = false;
+          }
+        })();
       });
       const body = message.createDiv({ cls: 'ai-advent-rag-message-body' });
       if (entry.role === 'assistant') {
