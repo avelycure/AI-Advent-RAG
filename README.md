@@ -34,11 +34,11 @@ Install `vault-skills/fmt/SKILL.md` at `<vault>/.agents/skills/fmt/SKILL.md`. Cr
 
 The skill formats Markdown and corrects spelling, punctuation, grammar and syntax while preserving meaning, facts and protected Obsidian objects. The full page is read when the queued task starts. Formatting makes one local model call, without RAG, query rewriting or chat history, and does not require a search index. Results appear in the dialog; the source page is not overwritten. The skill is reloaded from the vault on every request.
 
-Formatting uses temperature **0.1**, repeat penalty **1.0**, a **32,768-token** context and up to **8,192 output tokens**, with thinking disabled. Pages over **12,000 characters** are rejected rather than silently truncated. A response that reaches the output token limit is treated as incomplete.
+Formatting defaults to temperature **0.1**, repeat penalty **1.0**, a **32,768-token** context and up to **8,192 output tokens**, with thinking disabled. Per-dialog parameters override these defaults. Pages over **12,000 characters** are rejected rather than silently truncated. A response that reaches the output token limit is treated as incomplete.
 
 Run `node scripts/run-fmt-smoke.mjs` to test the installed local Qwen on synthetic notes. The script prints the temporary directory containing inputs, outputs and invariant checks; no real notes are edited.
 
-Existing cloud settings migrate automatically to local Ollama. The plugin does not fall back to a cloud model if Ollama is unavailable. The connection check sends only a test question. Chat history remains in `rag-chat-state.json`; a two-finger click (secondary click) on a dialog icon deletes that dialog. The generation request disables thinking and sets a 32,768-token context window with up to 4,096 output tokens.
+Existing cloud settings migrate automatically to local Ollama. The plugin does not fall back to a cloud model if Ollama is unavailable. The connection check sends only a test question. Chat history remains in `rag-chat-state.json`; a two-finger click (secondary click) on a dialog icon deletes that dialog. Dialog defaults disable thinking and use temperature 0.1, repeat penalty 1.0, a 32,768-token context window and up to 8,192 output tokens.
 
 The current chat has no task memory or context sufficiency gate. Even with no retrieved fragments, Qwen generates an answer. Responses are plain text; citations are no longer validated or repaired. The chat shows retrieval stages and streams the actual model response. Existing task memory is discarded when loading old chat state. Historical Day 24–25 sections below describe earlier builds.
 
@@ -51,6 +51,8 @@ Pinned notes keep their original identity as the user switches pages. At executi
 One shared FIFO queue executes a complete pipeline at a time: note reading, rewriting, embeddings, retrieval, and streaming generation. Dialogs with a waiting or running request are highlighted in the bottom icon menu. Queue position and global model occupancy are not shown. Switching tabs or closing the panel does not interrupt a running request. A dialog permits one outstanding message; other dialogs remain available. Connection tests, standalone searches, and index rebuilds also use this queue. A failed task restores its message for retry and releases the next task.
 
 Dialog histories, selection, and attachment paths survive restart in version 2 of `rag-chat-state.json`. Waiting/running jobs and drafts are transient; an unanswered message after restart is marked as interrupted and can be sent again. Enter sends a message; Shift+Enter inserts a newline. There is no send, clear, or delete button. A two-finger click (secondary click) on an icon deletes that specific dialog. A busy dialog cannot be deleted; removing a queued note attachment is allowed until the task starts.
+
+Hold a dialog icon for about half a second to open a panel above it with sliders for temperature, repetition penalty, output length and context size. Settings are saved per dialog and apply to regular questions and `/fmt`. Each submitted request captures its parameters immediately; changing sliders does not alter queued or running requests. Click outside the panel or press Escape to close it. Alt+Enter on a focused dialog icon also opens the panel. Reset restores the formatting defaults. The output limit is capped at half the context window to leave room for input.
 
 ## Day 27 verification
 

@@ -3,6 +3,7 @@ import { citationParts, sourceLinkText } from '../retrieval/citations';
 import type { GroundedCitation, RetrievalDiagnostics, SearchResult } from '../types';
 import { MAX_DIALOGS } from './chat-state';
 import type { ChatController } from './chat-controller';
+import { MODEL_PARAMETER_SLIDERS, sanitizeModelParameters } from '../llm/model-parameters';
 
 export const CHAT_VIEW_TYPE = 'ai-advent-rag-chat';
 export interface ChatPluginApi {
@@ -19,6 +20,8 @@ export class ChatView extends ItemView {
   private contextRemoveButton?: HTMLButtonElement;
   private tabs = new Map<string, HTMLButtonElement>();
   private draggedDialogId?: string;
+  private closeModelMenu?: () => void;
+  private holdTimers = new Set<number>();
 
   constructor(leaf: WorkspaceLeaf, private readonly pluginApi: ChatPluginApi) { super(leaf); }
   getViewType(): string { return CHAT_VIEW_TYPE; }
@@ -38,7 +41,7 @@ export class ChatView extends ItemView {
       this.contentEl.createDiv({ cls: 'ai-advent-rag-error', text: error instanceof Error ? error.message : String(error) });
     }
   }
-  async onClose(): Promise<void> { this.unsubscribe?.(); }
+  async onClose(): Promise<void> { this.unsubscribe?.(); this.clearModelMenu(); }
   refreshMode(): void { if (this.unsubscribe) this.render(); }
 
   private action(run: () => void): void {
@@ -52,6 +55,120 @@ export class ChatView extends ItemView {
     return button;
   }
 
+  private clearModelMenu(): void {
+    this.closeModelMenu?.();
+    for (const timer of this.holdTimers) this.contentEl.ownerDocument.defaultView?.clearTimeout(timer);
+    this.holdTimers.clear();
+  }
+
+  private openModelMenu(anchor: HTMLButtonElement, id: string): void {
+    this.closeModelMenu?.();
+    const controller = this.pluginApi.chatController;
+    const dialog = controller.state.dialogs.find((item) => item.id === id);
+    if (!dialog) return;
+    const doc = anchor.ownerDocument;
+    const win = doc.defaultView;
+    if (!win) return;
+    const panel = doc.body.createDiv({ cls: 'ai-advent-rag-model-menu', attr: { role: 'dialog', 'aria-label': `Параметры модели: ${dialog.title}` } });
+    const rect = anchor.getBoundingClientRect();
+    const width = Math.min(280, win.innerWidth - 16);
+    panel.setCssProps({
+      '--model-menu-width': `${width}px`,
+      '--model-menu-left': `${Math.max(8, Math.min(rect.left, win.innerWidth - width - 8))}px`,
+      '--model-menu-bottom': `${Math.max(8, win.innerHeight - rect.top + 8)}px`,
+      '--model-menu-height': `${Math.max(80, rect.top - 16)}px`,
+    });
+    panel.createDiv({ cls: 'ai-advent-rag-model-menu-title', text: dialog.title });
+    panel.createDiv({ cls: 'ai-advent-rag-model-menu-hint', text: 'Параметры следующих запросов' });
+    const controls = new Map<string, { input: HTMLInputElement; output: HTMLElement }>();
+    let parameters = sanitizeModelParameters(dialog.modelParameters);
+    const refresh = (): void => {
+      for (const slider of MODEL_PARAMETER_SLIDERS) {
+        const control = controls.get(slider.key)!;
+        control.input.value = String(parameters[slider.key]);
+        control.output.setText(slider.step < 1 ? parameters[slider.key].toFixed(2) : parameters[slider.key].toLocaleString('ru-RU'));
+      }
+    };
+    for (const slider of MODEL_PARAMETER_SLIDERS) {
+      const row = panel.createDiv({ cls: 'ai-advent-rag-model-parameter' });
+      const label = row.createEl('label');
+      label.createSpan({ text: slider.label });
+      const output = label.createEl('output');
+      const input = label.createEl('input', { attr: { type: 'range', min: String(slider.min), max: String(slider.max), step: String(slider.step), 'aria-label': slider.label } });
+      row.createDiv({ cls: 'ai-advent-rag-model-menu-hint', text: slider.hint });
+      controls.set(slider.key, { input, output });
+      input.addEventListener('input', () => {
+        parameters = sanitizeModelParameters({ ...parameters, [slider.key]: Number(input.value) });
+        refresh();
+      });
+      input.addEventListener('change', () => this.action(() => controller.setModelParameters(id, parameters)));
+    }
+    refresh();
+    const reset = panel.createEl('button', { cls: 'ai-advent-rag-model-reset', text: 'Сбросить' });
+    reset.addEventListener('click', () => this.action(() => {
+      parameters = sanitizeModelParameters(undefined);
+      controller.setModelParameters(id, parameters);
+      refresh();
+    }));
+    const events = new win.AbortController();
+    anchor.setAttribute('aria-expanded', 'true');
+    this.closeModelMenu = () => {
+      events.abort();
+      panel.remove();
+      anchor.setAttribute('aria-expanded', 'false');
+      this.closeModelMenu = undefined;
+    };
+    doc.addEventListener('pointerdown', (event) => {
+      if (!panel.contains(event.target as Node) && !anchor.contains(event.target as Node)) this.closeModelMenu?.();
+    }, { capture: true, signal: events.signal });
+    doc.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { this.closeModelMenu?.(); anchor.focus(); }
+    }, { signal: events.signal });
+    win.addEventListener('resize', () => this.closeModelMenu?.(), { signal: events.signal });
+    controls.get('temperature')?.input.focus();
+  }
+
+  private attachDialogActions(tab: HTMLButtonElement, id: string): void {
+    let timer: number | undefined;
+    let held = false;
+    let origin = { x: 0, y: 0 };
+    const cancelHold = (): void => {
+      if (timer !== undefined) { tab.ownerDocument.defaultView?.clearTimeout(timer); this.holdTimers.delete(timer); timer = undefined; }
+    };
+    tab.setAttribute('aria-haspopup', 'dialog');
+    tab.setAttribute('aria-expanded', 'false');
+    tab.addEventListener('pointerdown', (event) => {
+      cancelHold();
+      held = false;
+      if (event.button !== 0) return;
+      origin = { x: event.clientX, y: event.clientY };
+      timer = tab.ownerDocument.defaultView?.setTimeout(() => {
+        cancelHold();
+        held = true;
+        this.openModelMenu(tab, id);
+      }, 550);
+      if (timer !== undefined) this.holdTimers.add(timer);
+    });
+    tab.addEventListener('pointermove', (event) => {
+      if (Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > 8) cancelHold();
+    });
+    for (const event of ['pointerup', 'pointercancel', 'pointerleave']) tab.addEventListener(event, cancelHold);
+    tab.addEventListener('dragstart', (event) => { cancelHold(); if (held) event.preventDefault(); });
+    tab.addEventListener('click', (event) => {
+      if (held && event.detail !== 0) { event.preventDefault(); return; }
+      this.action(() => this.pluginApi.chatController.selectDialog(id));
+    });
+    tab.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && event.altKey) { event.preventDefault(); this.openModelMenu(tab, id); }
+    });
+    tab.addEventListener('contextmenu', (event) => {
+      cancelHold();
+      event.preventDefault();
+      event.stopPropagation();
+      if (!held) this.action(() => this.pluginApi.chatController.deleteDialog(id));
+    });
+  }
+
   private refreshTabs(): void {
     const controller = this.pluginApi.chatController;
     for (const dialog of controller.state.dialogs) {
@@ -63,6 +180,7 @@ export class ChatView extends ItemView {
   }
 
   private render(): void {
+    this.clearModelMenu();
     const controller = this.pluginApi.chatController;
     const dialog = controller.activeDialog;
     const restoreFocus = this.queryEl === document.activeElement;
@@ -94,9 +212,11 @@ export class ChatView extends ItemView {
       tab.toggleClass('is-active', item.id === dialog.id);
       tab.setAttribute('aria-pressed', item.id === dialog.id ? 'true' : 'false');
       tab.createSpan({ cls: 'ai-advent-rag-dialog-number', text: String(index + 1), attr: { 'aria-hidden': 'true' } });
-      tab.setAttribute('title', `${item.title} · перетащите, чтобы изменить порядок · клик двумя пальцами — удалить`);
+      tab.setAttribute('title', `${item.title} · удерживайте для настроек · перетащите для перемещения · клик двумя пальцами — удалить`);
+      this.attachDialogActions(tab, item.id);
       tab.draggable = true;
       tab.addEventListener('dragstart', (event) => {
+        if (event.defaultPrevented) return;
         this.draggedDialogId = item.id;
         if (event.dataTransfer) {
           event.dataTransfer.effectAllowed = 'move';
@@ -127,12 +247,6 @@ export class ChatView extends ItemView {
       tab.addEventListener('dragend', () => {
         this.draggedDialogId = undefined;
         for (const button of this.tabs.values()) button.removeClass('is-dragging', 'is-drop-before', 'is-drop-after');
-      });
-      tab.addEventListener('click', () => this.action(() => controller.selectDialog(item.id)));
-      tab.addEventListener('contextmenu', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        this.action(() => controller.deleteDialog(item.id));
       });
       this.tabs.set(item.id, tab);
     });

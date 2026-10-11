@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { sanitizeModelParameters, type ModelParameters } from '../llm/model-parameters';
 import type {
   ChatTurn,
   GroundedCitation,
@@ -24,6 +25,7 @@ export interface ChatEntry extends ChatTurn {
 }
 
 export interface ChatDialog {
+  modelParameters?: ModelParameters;
   id: string;
   title: string;
   contextPath: string | null;
@@ -39,7 +41,7 @@ export interface ChatState {
 }
 
 export function newChatDialog(contextPath: string | null, title = 'Новый диалог'): ChatDialog {
-  return { id: randomUUID(), title, contextPath, entries: [], createdAt: Date.now() };
+  return { id: randomUUID(), title, contextPath, entries: [], createdAt: Date.now(), modelParameters: sanitizeModelParameters(undefined) };
 }
 
 export function emptyChatState(): ChatState {
@@ -66,6 +68,7 @@ export function sanitizeChatState(value: unknown): ChatState {
       ids.add(id);
       dialogs.push({
         id, title: boundedString(dialog.title, 100) ?? 'Диалог',
+        modelParameters: sanitizeModelParameters(dialog.modelParameters),
         contextPath: validContextPath(dialog.contextPath),
         entries: sanitizeEntries(dialog.entries), createdAt: finiteNumber(dialog.createdAt) ?? Date.now(),
       });

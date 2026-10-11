@@ -33,6 +33,13 @@ describe('vault formatting skill', () => {
     expect(result.sources).toEqual([]);
     expect(result.text).toBe('Я добавил 250 г муки.');
   });
+  it('allows dialog options to override the formatting defaults', async () => {
+    const { llm, generate } = model();
+    const custom = { temperature: 0.4, repeat_penalty: 1.2, num_predict: 4096, num_ctx: 16384 };
+    await formatNote('/fmt', note, skill, llm, { ...config, options: custom });
+    const [, options] = generate.mock.calls[0]! as unknown as [unknown, LlmConfig];
+    expect(options.options).toEqual(custom);
+  });
   it('refuses missing, empty and oversized notes before calling the model', async () => {
     const { llm, generate } = model();
     await expect(formatNote('/fmt', undefined, skill, llm, config)).rejects.toThrow(/закреплённой/);

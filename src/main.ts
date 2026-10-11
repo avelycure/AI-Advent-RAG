@@ -10,6 +10,7 @@ import { ensureIndexDirectory, indexDirectoryPath } from './indexing/index-paths
 import { discoverFolders, scopeSignature } from './indexing/folder-scope';
 import { LocalStreamingTransport } from './infrastructure/local-streaming-transport';
 import { ModelTaskQueue } from './llm/model-task-queue';
+import type { ModelParameters } from './llm/model-parameters';
 import { ChatController } from './ui/chat-controller';
 import { ConfigurableLlmClient } from './llm/llm-client';
 import { RagService } from './rag/rag-service';
@@ -88,7 +89,7 @@ export default class AiAdventRagPlugin extends Plugin {
         return active?.extension === 'md' ? active.path : this.lastActiveNotePath;
       },
       readNote: (path) => this.readNoteContext(path),
-      answer: (question, history, context, onProgress, signal) => this.answerQuestion(question, history, onProgress, context, signal),
+      answer: (question, history, context, onProgress, signal, parameters) => this.answerQuestion(question, history, onProgress, context, signal, parameters),
       onError: (message) => { new Notice(message); },
     });
     try { await this.chatController.initialize(false); }
@@ -239,19 +240,20 @@ export default class AiAdventRagPlugin extends Plugin {
     onProgress?: (progress: ChatProgress) => void,
     activeNote?: ActiveNoteContext,
     signal?: AbortSignal,
+    parameters?: ModelParameters,
   ): Promise<RagAnswer> {
     if (isFormatCommand(question)) {
       if (!await this.app.vault.adapter.exists(FORMAT_SKILL_PATH)) {
         throw new Error(`Скилл fmt не найден: ${FORMAT_SKILL_PATH}`);
       }
       const skill = await this.app.vault.adapter.read(FORMAT_SKILL_PATH);
-      return formatNote(question, activeNote, skill, this.llmClient, { ...this.localLlmConfig(), signal }, onProgress);
+      return formatNote(question, activeNote, skill, this.llmClient, { ...this.localLlmConfig(), signal, options: parameters }, onProgress);
     }
     const snapshot = this.validatedSnapshot();
     return this.ragService.answer(
       question,
       snapshot,
-      { ...this.localLlmConfig(), signal },
+      { ...this.localLlmConfig(), signal, options: parameters },
       {
         candidateTopK: this.settings.retrievalCandidateTopK,
         finalTopK: this.settings.retrievalFinalTopK,

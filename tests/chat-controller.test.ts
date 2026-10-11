@@ -81,6 +81,29 @@ describe('independent queued dialogs', () => {
     gate.resolve();
     await blocking;
   });
+  it('persists parameters per dialog and snapshots them when queuing the request', async () => {
+    const received: number[] = [];
+    const { controller, saved, queue } = setup({ answer: async (question, _history, _context, _progress, _signal, parameters) => {
+      received.push(parameters!.temperature);
+      return answer(question);
+    } });
+    await controller.initialize();
+    const first = controller.activeDialog!;
+    const second = controller.createDialog();
+    const parameters = { temperature: 0.35, repeat_penalty: 1.1, num_predict: 4096, num_ctx: 32768 };
+    controller.setModelParameters(first.id, parameters);
+    expect(saved().dialogs[0]?.modelParameters).toEqual(parameters);
+    expect(second.modelParameters?.temperature).toBe(0.1);
+    const gate = deferred();
+    const blocking = queue.enqueue(() => gate.promise);
+    const pending = controller.send(first.id, 'before');
+    controller.setModelParameters(first.id, { ...parameters, temperature: 0.7 });
+    gate.resolve();
+    await blocking;
+    await pending;
+    await controller.send(first.id, 'after');
+    expect(received).toEqual([0.35, 0.7]);
+  });
   it('caps dialogs at ten and captures the active note separately for each new dialog', async () => {
     let path: string | null = 'First.md';
     const { controller } = setup({ activeNotePath: () => path });
@@ -139,7 +162,7 @@ describe('independent queued dialogs', () => {
     await request;
     expect(readNote).not.toHaveBeenCalled();
     // eslint-disable-next-line @typescript-eslint/unbound-method -- inspect a mock without invoking the method
-    expect(api.answer).toHaveBeenCalledWith('Question', [], undefined, expect.any(Function), expect.any(AbortSignal));
+    expect(api.answer).toHaveBeenCalledWith('Question', [], undefined, expect.any(Function), expect.any(AbortSignal), expect.any(Object));
   });
   it('isolates histories and restores the failed message for retry while the queue continues', async () => {
     const { controller } = setup({ answer: async (question, history) => {

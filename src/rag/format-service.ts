@@ -30,7 +30,7 @@ export async function formatNote(
     { role: 'user', content: 'Отформатируй выбранную страницу. Дополнительные указания пользователя:\n' +
       (question.trim().replace(/^\/(?:fmt|format)\b/iu, '').trim() || 'Нет.') +
       '\n\nВыбранная страница в формате JSON:\n' + JSON.stringify(activeNote) },
-  ], { ...config, requireComplete: true, options: { ...config.options, temperature: 0.1, repeat_penalty: 1, num_predict: 8192, num_ctx: 32768 } },
+  ], { ...config, requireComplete: true, options: { temperature: 0.1, repeat_penalty: 1, num_predict: 8192, num_ctx: 32768, ...config.options } },
   onProgress ? (delta) => onProgress({ kind: 'text', text: delta }) : undefined);
   config.signal?.throwIfAborted();
   return { text, sources: [], citations: [], groundingStatus: 'not-applicable',

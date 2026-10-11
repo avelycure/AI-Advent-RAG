@@ -1,5 +1,6 @@
 import type { ActiveNoteContext, ChatProgress, ChatTurn, RagAnswer } from '../types';
 import { ModelTaskQueue } from '../llm/model-task-queue';
+import { sanitizeModelParameters, type ModelParameters } from '../llm/model-parameters';
 import { emptyChatState, MAX_PERSISTED_CHAT_ENTRIES, MAX_DIALOGS, newChatDialog, type ChatDialog, type ChatState } from './chat-state';
 
 export interface ChatStore {
@@ -10,7 +11,7 @@ export interface ChatControllerApi {
   activeNotePath(): string | null;
   readNote(path: string): Promise<ActiveNoteContext>;
   answer(question: string, history: readonly ChatTurn[], context: ActiveNoteContext | undefined,
-    onProgress: (progress: ChatProgress) => void, signal?: AbortSignal): Promise<RagAnswer>;
+    onProgress: (progress: ChatProgress) => void, signal?: AbortSignal, parameters?: ModelParameters): Promise<RagAnswer>;
   onError(message: string): void;
 }
 export interface DialogRuntime {
@@ -78,6 +79,10 @@ export class ChatController {
     this.state.activeDialogId = id;
     this.changed();
   }
+  setModelParameters(id: string, parameters: ModelParameters): void {
+    this.requireDialog(id).modelParameters = sanitizeModelParameters(parameters);
+    this.changed('progress');
+  }
   moveDialog(id: string, targetId: string, after = false): void {
     const dialog = this.requireDialog(id);
     this.requireDialog(targetId);
@@ -129,6 +134,7 @@ export class ChatController {
     this.requireIdle(id);
     const dialog = this.requireDialog(id);
     const cancellation = new AbortController();
+    const parameters = sanitizeModelParameters(dialog.modelParameters);
     this.cancellations.set(id, cancellation);
     const history = dialog.entries.map(({ role, content }) => ({ role, content }));
     const userEntry = { role: 'user' as const, content: value, usedRag: true, usedRetrievalEnhancements: true };
@@ -147,7 +153,7 @@ export class ChatController {
           if (progress.kind === 'stage') runtime.status = progress.text;
           else { runtime.text += progress.text; runtime.status = 'Qwen отвечает…'; }
           this.emit('progress');
-        }, cancellation.signal);
+        }, cancellation.signal, parameters);
       }, (position) => {
         runtime.position = position;
         runtime.phase = position === 0 ? 'running' : 'queued';
@@ -185,11 +191,11 @@ export class ChatController {
   private requireIdle(id: string): void {
     if (this.runtime(id).phase !== 'idle') throw new Error('В этом диалоге уже есть запрос. Дождитесь ответа.');
   }
-  private changed(): void {
+  private changed(kind: 'change' | 'progress' = 'change'): void {
     if (this.disposed) return;
     void this.store.save(this.state).catch((error: unknown) => this.api.onError(
       `Не удалось сохранить диалоги: ${error instanceof Error ? error.message : String(error)}`));
-    this.emit('change');
+    this.emit(kind);
   }
   private emit(kind: 'change' | 'progress'): void {
     if (this.disposed) return;
